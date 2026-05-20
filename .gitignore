@@ -1,0 +1,24 @@
+# Environment
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data & models (mount externally)
+models/
+data/
+*.gguf
+
+# Obsidian / index (local)
+.chroma/
+index/
+
+# OS
+Thumbs.db
+.DS_Store
