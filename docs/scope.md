@@ -26,6 +26,7 @@
 - [ ] **Phase 1:** 에이전트 간 JSON Envelope 스키마로 `task_queue` / `result_queue` 왕복 1회 성공
 - [ ] **Phase 2:** LangGraph로 Router → 처리 → (실패 시) 1회 재시도 루프
 - [ ] **Phase 2:** `task_status:{task_id}` Redis Hash로 진행 상태 조회
+- [ ] **Phase 2:** `recommend_model.py` — GPU/RAM 진단 후 모델·오프로딩 추천 ([`archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md))
 - [ ] **Phase 3:** Obsidian 마크다운 소수 파일, 헤딩 단위 청킹 + SHA-256 증분 인덱싱
 - [ ] **Phase 3:** 벡터 검색 1종(Chroma 등)으로 질의 → 답변 1회 E2E
 
@@ -79,9 +80,9 @@
 |-------|--------------|--------|
 | 0 PoC | 1~2일 | `model-comparison.md` 실측, 트러블슈팅 #1 |
 | 1 Infra | 3~5일 | `docker-compose.yml`, Redis 큐 E2E |
-| 2 Agent | 5~7일 | `src/` LangGraph, 스키마 검증 |
+| 2 Agent | 5~7일 | `src/` LangGraph, 스키마 검증, **`recommend_model.py`** (Resource-Aware) |
 | 3 Knowledge | 5~7일 | 청킹·벡터 검색 최소 |
-| 4 Expand | 선택 | 듀얼 모델, Open WebUI, 클라우드 비교 |
+| 4 Expand | 선택 | Vertex 30문항 대조(옵션), Conservative 하이브리드 — [`../archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md) |
 
 **상태 범례:** 📝 문서만 · ⏳ 진행 예정 · ✅ 완료 · 🔲 보류
 

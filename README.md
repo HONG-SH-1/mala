@@ -11,6 +11,9 @@
 
 **지식(Data) · 추론(Model) · 에이전트(Agent) · 인프라(Infra)** 네 축 — VRAM 검토 후 Redis + LangGraph + RAG로 Local LLM 서비스를 설계했습니다.
 
+> **구현 기준:** [`docs/scope.md`](docs/scope.md) · [`docs/architecture.md`](docs/architecture.md)  
+> **확장 설계안(V2):** [`archive/MALA_V2-vision.md`](archive/MALA_V2-vision.md) (하이브리드·`recommend_model.py` 등 — E2E 이후)
+
 ---
 
 ## 읽는 순서

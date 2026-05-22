@@ -18,6 +18,7 @@
 | [`system-overview-draft.md`](system-overview-draft.md) | 4축 요약 초안 | [`README.md`](../README.md) |
 | [`review-gemini-2026-05.md`](review-gemini-2026-05.md) | 외부 리뷰 ① — 리스크·Plan B | [`docs/scope.md`](../docs/scope.md) §6~7 |
 | [`review-claude-2026-05.md`](review-claude-2026-05.md) | 외부 리뷰 ② — VRAM·범위 | [`troubleshooting/2026-05-20-moe-vram.md`](../troubleshooting/2026-05-20-moe-vram.md) |
+| [`MALA_V2-vision.md`](MALA_V2-vision.md) | V2 확장안 (다이어트) | Phase 2+ · 구현 기준은 `scope`/`architecture` |
 
 ---
 
