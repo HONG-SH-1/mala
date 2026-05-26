@@ -8,10 +8,10 @@
 
 | # | 시나리오 | Phase | 상태 |
 |---|----------|-------|------|
-| 1 | `docker compose up` 후 Redis ping | 1 | ⏳ |
-| 2 | `task_queue` → worker → `result_queue` JSON 1건 | 1 | ⏳ |
-| 3 | LangGraph 1회 실행 (CLI) | 2 | ⏳ |
-| 4 | Obsidian 노트 1개 질의 → RAG 답변 | 3 | ⏳ |
+| 1 | Native Redis `redis-cli ping` → PONG | 1 | ✅ |
+| 2 | `python -m src.scripts.e2e_once` → E2E SUCCESS | 1 | ✅ 2026-05-26 |
+| 3 | `run_graph_once` → GRAPH SUCCESS + `task_status` | 2 | ✅ 2026-05-26 (`TASK-a4cdc28b`) |
+| 4 | `rag_once` → RAG SUCCESS + `Phase-2-Agent.md` hits | 3 | ✅ 2026-05-26 (`TASK-3458907b`) |
 
 ---
 
@@ -45,12 +45,32 @@ docker compose exec redis redis-cli PING
 python -m src.scripts.enqueue_sample
 python -m src.scripts.run_worker_once
 
-# Phase 2 — LangGraph
+# Phase 2 — LangGraph (Worker in another terminal unless --inline)
+python -m src.worker
 python -m src.scripts.run_graph_once --task "테스트 질문"
+python -m src.scripts.show_task_status TASK-xxxxxxxx
+python -m src.recommend_model
+
+# Phase 3 — RAG
+ollama pull nomic-embed-text
+python -m src.scripts.build_index
+python -m src.worker
+python -m src.scripts.rag_once --task "vault 노트에서 MALA Phase 2 설명"
 ```
 
 ---
 
-## 5. 완료 시 README 반영
+## 5. 스크린샷 (날짜별 일지)
 
-데모 1번이라도 성공하면 [`../README.md`](../README.md) **현재 진행 상태** 표를 ✅로 갱신하고, 이 문서에 스크린샷 링크를 추가합니다.
+상세: [`development-log.md`](development-log.md) (2026-05-23 ~ 05-26)
+
+| 자산 | 용도 |
+|------|------|
+| [redis-pong](assets/2026-05-26-redis-pong.png) | 05-23 BIOS→Native Redis |
+| [e2e-success](assets/2026-05-26-e2e-success.png) | 05-24 Phase 1 |
+| [langgraph-dual-terminal](assets/2026-05-26-langgraph-dual-terminal.png) | 05-25 Phase 2 |
+| [recommend-model-3080](assets/2026-05-26-recommend-model-3080.png) | 05-25 |
+| [incremental-index](assets/2026-05-26-incremental-index.png) | 05-26 Phase 3 |
+| [rag-success-phase2](assets/2026-05-26-rag-success-phase2.png) | 05-26 |
+| [verify-incremental-100](assets/2026-05-26-verify-incremental-100.png) | 05-26 |
+| [vram-peak](assets/026-05-20-vram-peak.png) | 05-20 PoC |

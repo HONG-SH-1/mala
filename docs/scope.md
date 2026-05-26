@@ -21,14 +21,13 @@
 
 **“이런 생각을 했다”**를 증명할 수 있는 최소 구현 단위입니다.
 
-- [ ] **Phase 0:** 3080에서 후보 모델 VRAM·속도 표 작성 ([`model-comparison.md`](model-comparison.md)에 실측 반영)
-- [ ] **Phase 1:** `docker compose`로 Redis + 로컬 추론 엔진 기동
-- [ ] **Phase 1:** 에이전트 간 JSON Envelope 스키마로 `task_queue` / `result_queue` 왕복 1회 성공
-- [ ] **Phase 2:** LangGraph로 Router → 처리 → (실패 시) 1회 재시도 루프
-- [ ] **Phase 2:** `task_status:{task_id}` Redis Hash로 진행 상태 조회
-- [ ] **Phase 2:** `recommend_model.py` — GPU/RAM 진단 후 모델·오프로딩 추천 ([`archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md))
-- [ ] **Phase 3:** Obsidian 마크다운 소수 파일, 헤딩 단위 청킹 + SHA-256 증분 인덱싱
-- [ ] **Phase 3:** 벡터 검색 1종(Chroma 등)으로 질의 → 답변 1회 E2E
+- [x] **Phase 0:** 3080에서 후보 모델 VRAM·속도 표 작성 ([`model-comparison.md`](model-comparison.md)에 실측 반영)
+- [x] **Phase 1:** Redis + JSON Envelope `task_queue` / `result_queue` 왕복 1회 — 2026-05-26 `e2e_once` 성공 ([ADR-002](decisions/002-native-redis-phase1.md))
+- [x] **Phase 2:** LangGraph로 Router → 처리 → (실패 시) 1회 재시도 루프 — 2026-05-26 `run_graph_once` (`TASK-a4cdc28b`)
+- [x] **Phase 2:** `task_status:{task_id}` Redis Hash로 진행 상태 조회
+- [x] **Phase 2:** `recommend_model.py` — GPU/RAM 진단 후 모델·오프로딩 추천 ([`archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md)) — `nvidia-smi` 폴백 추가
+- [x] **Phase 3:** Obsidian 마크다운 소수 파일, 헤딩 단위 청킹 + SHA-256 증분 인덱싱 — 2026-05-26 `build_index` (12 chunks)
+- [x] **Phase 3:** 벡터 검색 1종(Chroma + Ollama embed)으로 질의 → 답변 1회 E2E — 2026-05-26 `rag_once` (`TASK-01c5c1e4`)
 
 ---
 
@@ -79,7 +78,7 @@
 | Phase | 기간(가이드) | 산출물 |
 |-------|--------------|--------|
 | 0 PoC | 1~2일 | `model-comparison.md` 실측, 트러블슈팅 #1 |
-| 1 Infra | 3~5일 | `docker-compose.yml`, Redis 큐 E2E |
+| 1 Infra | 3~5일 | Native Redis 또는 `docker-compose.yml`, 큐 E2E (`src/scripts/e2e_once.py`) |
 | 2 Agent | 5~7일 | `src/` LangGraph, 스키마 검증, **`recommend_model.py`** (Resource-Aware) |
 | 3 Knowledge | 5~7일 | 청킹·벡터 검색 최소 |
 | 4 Expand | 선택 | Vertex 30문항 대조(옵션), Conservative 하이브리드 — [`../archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md) |

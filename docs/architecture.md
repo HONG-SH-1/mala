@@ -33,7 +33,7 @@ flowchart TB
 | **Data** | Obsidian 폴더 마운트, 헤딩 청킹, SHA-256 증분 | 3 |
 | **Model** | 단일 SLLM (8B Q4 우선), API 호출 | 0~1 |
 | **Agent** | LangGraph 노드 + Redis List 큐 | 2 |
-| **Infra** | Docker Compose, `.env` | 1 |
+| **Infra** | Native Redis (Phase 1), `.env`, optional Compose | 1 |
 
 ---
 
@@ -124,25 +124,25 @@ Checkpointer: 1차는 in-memory → 안정화 후 Redis.
 
 ---
 
-## 6. Docker Compose (Phase 1 목표)
+## 6. Phase 1 인프라 (Native Redis — ADR-002)
+
+**기본 (BIOS Docker 불가 시):** Windows Native Redis + 호스트 Python + Ollama(호스트).
+
+```text
+e2e_once / Orchestrator  →  RPUSH task_queue
+Worker (src/worker.py)   →  BRPOPLPUSH → processing → Ollama → RPUSH result_queue
+```
+
+**Optional:** [`docker-compose.yml`](../docker-compose.yml) — Redis만 (BIOS SVM 후).
 
 ```yaml
-# 목표 서비스 (구현 시 파일 생성)
 services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
-
-  inference:
-    # Ollama 또는 vLLM — ADR-001 확정 후 반영
-    ...
-
-  # agent:
-  #   build: .
-  #   depends_on: [redis, inference]
 ```
 
-GPU 예약·`gpu-memory-utilization`은 **실측 VRAM**에 맞춰 `.env`로만 조정합니다.
+Ollama는 **호스트** `127.0.0.1:11434` — Worker가 직접 호출 ([ADR-001](decisions/001-inference-engine.md)).
 
 ---
 
@@ -167,7 +167,7 @@ tests/
 
 | 시나리오 | 동작 |
 |----------|------|
-| Worker OOM | 큐에 메시지 유지, worker 재기동 후 BLPOP 재개 |
+| Worker OOM / kill | `BRPOPLPUSH` → 메시지 `processing_queue` 잔류 → 재기동 후 처리 |
 | Orchestrator 중단 | Phase 2+ Redis checkpointer로 `thread_id` 재개 (목표) |
 | 인덱스 실패 | SHA-256 미변경 파일 스킵 |
 
@@ -187,4 +187,4 @@ tests/
 
 | 날짜 | 변경 |
 |------|------|
-| 2026-05-20 | 문서 초안 — Phase 0~3 기준으로 축소 작성 |
+| 2026-05-22 | Phase 1 Native Redis 경로, `src/` 구조 반영 |

@@ -1,0 +1,9 @@
+# Optional — use after BIOS SVM enabled (ADR-002)
+# Phase 1 default path: Native Redis on Windows host
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no

@@ -11,7 +11,7 @@ PoC·실측 시 **동일 스펙 표**를 기준으로 재현성을 맞춥니다.
 |------|------|-----------------|
 | **CPU** | AMD Ryzen 5 5600X (6C/12T, ~3.7GHz) | Docker·Redis·에이전트 로직, **임베딩**, 일부 CPU offload, 인덱싱 |
 | **GPU** | NVIDIA GeForce **RTX 3080** (**10GB VRAM**) | LLM 추론 가중치·KV cache (**1차 병목**) |
-| **GPU 드라이버** | **32.0.15.9186** (Windows, 2026-05 사용자 확인) | CUDA·Ollama 호환; Phase 0 실측 환경 |
+| **GPU 드라이버** | **591.86** (Windows 32.0.15.9186) · **CUDA 13.1** (`nvidia-smi`) | CUDA·Ollama 호환; Phase 0 실측 환경 |
 | **RAM** | **32.0 GB** 설치 (총 실제 **31.9 GB**) | Ollama/vLLM 호스트·offload, Chroma, Redis, Docker |
 | **Storage** | _TBD_ (SSD 권장) | GGUF 모델, Obsidian vault, 벡터 인덱스 |
 | **OS** | Windows 10/11 | 개발 호스트 |
@@ -52,7 +52,7 @@ PoC·실측 시 **동일 스펙 표**를 기준으로 재현성을 맞춥니다.
 - [x] **RAM 설치:** 32 GB (`msinfo32` 확인)
 - [ ] **RAM peak:** 추론+인덱싱 동시 실행 시 사용 가능 메모리 최소값
 - [x] **GPU 모델·드라이버:** RTX 3080 · 32.0.15.9186
-- [ ] **GPU VRAM peak:** `qwen3:8b` cold load 후 (`nvidia-smi`)
+- [x] **GPU VRAM peak:** `qwen3:8b` 질문 입력 시 **7559 MiB**, GPU-Util **92%** burst (2026-05-20)
 - [ ] **CPU:** 인덱싱·추론 시 Utilization (과열/스로틀 여부)
 - [ ] **디스크:** 모델·vault·index 경로, 여유 공간
 
