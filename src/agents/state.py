@@ -21,3 +21,5 @@ class AgentState(TypedDict, total=False):
     max_retries: int
     history: Annotated[list[str], operator.add]
     last_error: str
+    tool_step_count: int
+    router_note: str

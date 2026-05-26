@@ -30,6 +30,9 @@
 | 05-26 | [rag-vault-sample](assets/2026-05-26-rag-vault-sample.png) | Phase 3 RAG `vault_sample` (`TASK-3458907b`) |
 | 05-26 | [verify-incremental-100](assets/2026-05-26-verify-incremental-100.png) | `verify_incremental --count 100` |
 | 05-26 | [rag-obsidian-vault](assets/2026-05-26-rag-obsidian-vault.png) | **실제 볼트** `D:\Ob\Vault` (`TASK-4860f95a`) — 저장 시 링크 활성 |
+| 05-26 | [hermes-preflight](assets/2026-05-26-hermes-preflight.png) | `check_paths` — `USE_HERMES: True` |
+| 05-26 | [hermes-rag-success](assets/2026-05-26-hermes-rag-success.png) | Phase 4 `run_hermes_once` + context (`TASK-8f744eba`) |
+| 05-26 | [ollama-models-d](assets/2026-05-26-ollama-models-d.png) | `server.log` — `OLLAMA_MODELS:D:\ollama\models` |
 
 ---
 
@@ -42,13 +45,15 @@
 | 3 | `run_graph_once` → GRAPH SUCCESS | 2 | `TASK-a4cdc28b` |
 | 4 | `rag_once` (vault_sample) | 3 | `TASK-3458907b` |
 | 5 | `rag_once` (`D:\Ob\Vault`) | 3 | `TASK-4860f95a` |
+| 6 | `run_hermes_once` (vault 질문) | 4 | `TASK-8f744eba` |
+| 7 | `run_hermes_once --ood` | 4 | `TASK-9a2e30e5` |
 
 ---
 
 ## 4. 데모 설명 (30초)
 
 > 3080 10GB에서 MoE는 VRAM 검토로 기각, Native Redis + LangGraph + Obsidian(Chroma) RAG를 로컬 E2E로 검증했습니다.  
-> BIOS로 Docker는 막혀 Redis만 호스트에 두었고, 증분 인덱스(100개 중 99 skip)와 실제 Obsidian 볼트 질의까지 확인했습니다.
+> BIOS로 Docker는 막혀 Redis만 호스트에 두었고, Phase 4에서 Hermes 라우터 + vault 폴백 RAG로 볼트 환영 메시지까지 확인했습니다 (Hermes·Qwen VRAM **교대**, peak 각각 문서화).
 
 ---
 
@@ -62,6 +67,10 @@ python -m src.scripts.run_graph_once --task "..."
 python -m src.scripts.build_index
 python -m src.scripts.rag_once --task "옵시디언 노트에서 ..."
 python -m src.scripts.verify_incremental --count 100
+python -m src.scripts.check_paths
+python -m src.worker
+python -m src.scripts.run_hermes_once
+python -m src.scripts.run_hermes_once --ood
 ```
 
-상세: [`../README.md`](../README.md) · [`development-log.md`](development-log.md)
+상세: [`../README.md`](../README.md) · [`development-log.md`](development-log.md) · [ADR-003](decisions/003-phase4-hermes-router.md)

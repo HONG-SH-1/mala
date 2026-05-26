@@ -17,6 +17,7 @@ from src.schemas import (
     TaskEnvelope,
     TaskStatus,
 )
+from src.agents.hermes_router import plan_route
 from src.retrieval.pipeline import VaultRetriever
 from src.worker import build_prompt, call_ollama
 
@@ -41,6 +42,32 @@ def _status(
     if extra:
         fields.update(extra)
     store.update(task_id, fields)
+
+
+def hermes_route_node(
+    state: dict,
+    *,
+    store: TaskStatusStore,
+    settings: Settings | None = None,
+) -> dict:
+    settings = settings or get_settings()
+    out = plan_route(
+        state["task_input"],
+        settings,
+        tool_step_count=state.get("tool_step_count", 0),
+    )
+    if "intent" not in out:
+        out["intent"] = Intent.ANALYZE.value
+    _status(
+        state,
+        store,
+        "hermes_route",
+        {
+            "route_decision": out.get("route_decision", ""),
+            "tool_steps": out.get("tool_step_count", 0),
+        },
+    )
+    return out
 
 
 def route_node(state: dict, *, store: TaskStatusStore) -> dict:
@@ -247,6 +274,7 @@ def new_task_state(
         "task_id": tid,
         "task_input": task_input,
         "error_count": 0,
+        "tool_step_count": 0,
         "max_retries": max_retries,
         "valid": False,
         "history": [],

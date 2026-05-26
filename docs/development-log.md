@@ -123,10 +123,51 @@ Phase 1은 `docker compose`로 Redis를 띄우는 그림이었는데, PC에서 *
 ![100파일 검증](assets/2026-05-26-verify-incremental-100.png)  
 ![RAG Obsidian Vault](assets/2026-05-26-rag-obsidian-vault.png) — A/B 터미널 (`TASK-4860f95a`)
 
+### 저녁 — Ollama 모델 경로 (D:) + Phase 4 준비
+
+**배경:** C 드라이브 여유 확보, Phase 4용 `hermes3:8b` pull.
+
+| 구간 | 내용 |
+|------|------|
+| 설정 | `OLLAMA_MODELS=D:\ollama\models` (시스템 변수), 기존 `models` → D 복사 |
+| 막힘 | **재부팅·Quit 후에도** `server.log`에 `OLLAMA_MODELS` = **C** 고정 |
+| 원인 | Ollama **0.24** — `%LOCALAPPDATA%\Ollama\db.sqlite` `settings.models`가 C로 저장됨 (env보다 우선) |
+| 조치 | DB `models` → `D:\ollama\models` 수정 · 트레이 Quit 후 재시작으로 로그 재확인 · 필요 시 C→D **junction** |
+
+- `hermes3:8b` pull 완료 (~4.7 GB), `ollama list` 3모델
+- C `models` → `models_old` 후 **`rmdir`** — `server.log`에 `OLLAMA_MODELS:D:\ollama\models` 확인
+- 상세: [`troubleshooting/2026-05-26-ollama-models-path-windows.md`](../troubleshooting/2026-05-26-ollama-models-path-windows.md)
+
+### 밤 — Phase 4: Hermes 라우터 PoC
+
+| 구간 | 내용 |
+|------|------|
+| 설정 | `.env` — `USE_HERMES_ROUTER=1`, `OLLAMA_ROUTER_MODEL=hermes3:8b`, `MAX_TOOL_STEPS=5` |
+| 코드 | `hermes_router.py`, `run_hermes_once.py`, `measure_router_vram.py`, `check_paths` |
+| 막힘 1 | Hermes가 **`search_vault` tool 미호출** → Qwen만 답 → 환각 (`Opacity Notes` 등) |
+| 조치 | **키워드 폴백** (`fallback_vault_query`) — vault형 질문이면 Chroma 검색 강제 · OOD(월드컵)는 제외 |
+| 막힘 2 | Chroma **telemetry ERROR** (posthog) — RAG 무관, `chroma_store.py`에서 로그 억제 |
+| VRAM | Hermes **단독** peak **7418 MiB** / 10240 · `ollama ps` **5.2 GB** — [`model-comparison.md`](model-comparison.md) |
+
+### 검증 로그 (Phase 4)
+
+- `check_paths` — PREFLIGHT OK, `USE_HERMES: True`
+- `run_hermes_once --ood` — **OOD OK** (`TASK-9a2e30e5`), `search_vault` 없음
+- `run_hermes_once` (vault) — **HERMES SUCCESS** (`TASK-6ae4de11`, `TASK-8f744eba`)
+  - `route: needs_context` · `hermes:fallback_search:1_hits` · context `환영합니다!.md`
+  - 답: **"환영합니다!"** (볼트와 일치)
+
+### 증빙
+
+![Hermes preflight](assets/2026-05-26-hermes-preflight.png)  
+![Hermes RAG](assets/2026-05-26-hermes-rag-success.png) — `TASK-8f744eba`  
+![Ollama D: models](assets/2026-05-26-ollama-models-d.png)
+
 ### 메모
 
-- VRAM PoC(8B peak)는 **05-20** — [`assets/2026-05-20-vram-peak.png`](assets/2026-05-20-vram-peak.png)
-- Phase 4(Hermes Tool)는 [`decisions/003-phase4-hermes-router.md`](decisions/003-phase4-hermes-router.md) **초안만**
+- VRAM PoC(Qwen peak)는 **05-20** — [`assets/2026-05-20-vram-peak.png`](assets/2026-05-20-vram-peak.png)
+- Phase 4 결정·PoC: [`decisions/003-phase4-hermes-router.md`](decisions/003-phase4-hermes-router.md)
+- Hermes **네이티브 tool 호출**은 PoC 이후 개선 (현재 폴백으로 RAG 보장)
 
 ---
 
@@ -137,7 +178,7 @@ Phase 1은 `docker compose`로 Redis를 띄우는 그림이었는데, PC에서 *
 | 05-23 | 인프라 막힘 **정리·결정** (BIOS → Native Redis) |
 | 05-24 | Phase 1 **큐 E2E** |
 | 05-25 | Phase 2 **LangGraph** + 리소스 진단 |
-| 05-26 | Phase 3 **RAG + 증분·검증** |
+| 05-26 | Phase 3 **RAG** · **Ollama D:** · Phase 4 **Hermes PoC** (폴백 RAG) |
 
 ---
 
@@ -149,3 +190,5 @@ Phase 1은 `docker compose`로 Redis를 띄우는 그림이었는데, PC에서 *
 | 05-25 | 2 Graph | `TASK-a4cdc28b` |
 | 05-26 | 3 RAG (vault_sample) | `TASK-3458907b` |
 | 05-26 | 3 RAG (Ob Vault) | `TASK-4860f95a` |
+| 05-26 | 4 Hermes OOD | `TASK-9a2e30e5` |
+| 05-26 | 4 Hermes vault+RAG | `TASK-8f744eba` (대표) · `TASK-6ae4de11` |

@@ -7,7 +7,7 @@
 | **기간** | 2026-05-19 ~ **2026-05-26 (V1)** |
 | **단계** | 설계(05-20) ✅ · 구현·E2E(05-23~26) ✅ — [`docs/development-log.md`](docs/development-log.md) |
 | **문서·아키텍처** | ✅ [`docs/`](docs/) · [`troubleshooting/`](troubleshooting/) |
-| **구현** | ✅ Phase 0~3 로컬 검증 (Phase 4 선택) |
+| **구현** | ✅ Phase 0~4 PoC 로컬 검증 |
 
 **지식(Data) · 추론(Model) · 에이전트(Agent) · 인프라(Infra)** 네 축 — VRAM 검토 후 Redis + LangGraph + RAG로 Local LLM 서비스를 설계했습니다.
 
@@ -35,7 +35,7 @@
 | 1 | Redis + JSON Envelope 큐 E2E (Native Redis) | ✅ 2026-05-26 E2E (`TASK-a7525fce`) |
 | 2 | LangGraph 최소 워크플로 + `task_status` + `recommend_model` | ✅ 2026-05-26 (`TASK-a4cdc28b`) |
 | 3 | Obsidian 청킹 + Chroma RAG E2E | ✅ 2026-05-26 (`TASK-3458907b`) |
-| 4 | 듀얼 모델 / UI / 클라우드 PoC | 🔲 범위 외(초기) |
+| 4 | Hermes 라우터 + vault RAG (폴백) | ✅ 2026-05-26 (`TASK-8f744eba`) |
 
 ```
 Phase 0  VRAM·RAM 실측 → Phase 1  Docker·Redis·큐 E2E
@@ -216,6 +216,40 @@ python -m src.scripts.rag_once --task "vault 노트에서 MALA Phase 2가 무엇
 
 성공 시 `--- RAG SUCCESS ---` 와 `retrieve:N_hits` 히스토리가 보입니다.  
 질문에 `vault` / `노트` / `옵시디언` / `검색` 등이 있어야 `route → retrieve` 경로로 갑니다.
+
+---
+
+## 빠른 시작 (Phase 4 — Hermes router, PoC)
+
+### 0. VRAM 실측 (먼저)
+
+```powershell
+ollama pull hermes3:8b
+python -m src.scripts.measure_router_vram
+```
+
+Hermes 단독 peak **7418 MiB** (2026-05-26) — [`docs/model-comparison.md`](docs/model-comparison.md). 재측정 시 Qwen unload 후 `ollama run hermes3:8b` + `measure_router_vram`.
+
+### 1. `.env`
+
+```powershell
+USE_HERMES_ROUTER=1
+OLLAMA_ROUTER_MODEL=hermes3:8b
+MAX_TOOL_STEPS=5
+```
+
+답변 모델은 그대로 `OLLAMA_MODEL=qwen3:8b` (동시 GPU 적재 금지 — [ADR-003](docs/decisions/003-phase4-hermes-router.md)).  
+Hermes가 tool을 안 부르면 **vault 키워드 폴백**으로 Chroma 검색 (`hermes:fallback_search`).
+
+### 2. 실행
+
+```powershell
+python -m src.worker
+python -m src.scripts.run_hermes_once --task "옵시디언 노트에서 환영 메시지 설명해줘"
+python -m src.scripts.run_hermes_once --ood
+```
+
+`--ood` = vault 검색 없이 답해야 함 (제미나이 카오스 시나리오).
 
 ---
 

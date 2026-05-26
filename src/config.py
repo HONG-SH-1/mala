@@ -31,6 +31,9 @@ class Settings:
     ollama_embed_model: str
     rag_top_k: int
     index_failures_path: str
+    ollama_router_model: str
+    max_tool_steps: int
+    use_hermes_router: bool
 
 
 def get_settings() -> Settings:
@@ -64,4 +67,8 @@ def get_settings() -> Settings:
         index_failures_path=os.getenv(
             "INDEX_FAILURES_PATH", "data/index_failures.jsonl"
         ),
+        ollama_router_model=os.getenv("OLLAMA_ROUTER_MODEL", "hermes3:8b"),
+        max_tool_steps=int(os.getenv("MAX_TOOL_STEPS", "5")),
+        use_hermes_router=os.getenv("USE_HERMES_ROUTER", "0").lower()
+        in ("1", "true", "yes"),
     )

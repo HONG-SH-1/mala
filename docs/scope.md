@@ -27,7 +27,8 @@
 - [x] **Phase 2:** `task_status:{task_id}` Redis Hash로 진행 상태 조회
 - [x] **Phase 2:** `recommend_model.py` — GPU/RAM 진단 후 모델·오프로딩 추천 ([`archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md)) — `nvidia-smi` 폴백 추가
 - [x] **Phase 3:** Obsidian 마크다운 소수 파일, 헤딩 단위 청킹 + SHA-256 증분 인덱싱 — 2026-05-26 `build_index` (12 chunks)
-- [x] **Phase 3:** 벡터 검색 1종(Chroma + Ollama embed)으로 질의 → 답변 1회 E2E — 2026-05-26 `rag_once` (`TASK-01c5c1e4`)
+- [x] **Phase 3:** 벡터 검색 1종(Chroma + Ollama embed)으로 질의 → 답변 1회 E2E — 2026-05-26 `rag_once` (`TASK-3458907b` / Ob Vault `TASK-4860f95a`)
+- [x] **Phase 4 (PoC):** Hermes 라우터 + `search_vault` / 폴백 RAG + OOD 구분 — 2026-05-26 `run_hermes_once` (`TASK-8f744eba`, `--ood` `TASK-9a2e30e5`) — [ADR-003](decisions/003-phase4-hermes-router.md)
 
 ---
 
@@ -81,7 +82,7 @@
 | 1 Infra | 3~5일 | Native Redis 또는 `docker-compose.yml`, 큐 E2E (`src/scripts/e2e_once.py`) |
 | 2 Agent | 5~7일 | `src/` LangGraph, 스키마 검증, **`recommend_model.py`** (Resource-Aware) |
 | 3 Knowledge | 5~7일 | 청킹·벡터 검색 최소 |
-| 4 Expand | 선택 | Vertex 30문항 대조(옵션), Conservative 하이브리드 — [`../archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md) |
+| 4 Router | 선택 → **PoC ✅** | Hermes `hermes3:8b` + vault 폴백 RAG — Vertex/UI는 [`../archive/MALA_V2-vision.md`](../archive/MALA_V2-vision.md) |
 
 **상태 범례:** 📝 문서만 · ⏳ 진행 예정 · ✅ 완료 · 🔲 보류
 

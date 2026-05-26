@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 from src.agents.nodes import (
     answer_inline,
     answer_via_queue,
+    hermes_route_node,
     new_task_state,
     retrieve_node,
     route_node,
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 def _route_branch(state: AgentState) -> Literal["retrieve", "answer"]:
     if state.get("route_decision") == "needs_context":
+        if state.get("retrieved_chunks"):
+            return "answer"
         return "retrieve"
     return "answer"
 
@@ -58,7 +61,13 @@ def build_graph(
         answer_fn = partial(answer_inline, settings=settings, store=store)
 
     graph = StateGraph(AgentState)
-    graph.add_node("route", partial(route_node, store=store))
+    if settings.use_hermes_router:
+        graph.add_node(
+            "route",
+            partial(hermes_route_node, store=store, settings=settings),
+        )
+    else:
+        graph.add_node("route", partial(route_node, store=store))
     graph.add_node(
         "retrieve",
         partial(retrieve_node, store=store, settings=settings),
@@ -88,8 +97,13 @@ def run_task(
     *,
     use_queue: bool = True,
     settings: Settings | None = None,
+    use_hermes_router: bool | None = None,
 ) -> AgentState:
     settings = settings or get_settings()
+    if use_hermes_router is not None:
+        from dataclasses import replace
+
+        settings = replace(settings, use_hermes_router=use_hermes_router)
     store = TaskStatusStore(settings)
     initial = new_task_state(
         task_input,

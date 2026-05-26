@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+# Chroma 0.5.x: telemetry off still logs posthog errors — suppress (harmless to RAG).
+logging.getLogger("chromadb").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
