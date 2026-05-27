@@ -4,8 +4,8 @@
 
 | | |
 |---|---|
-| **기간** | 2026-05-19 ~ **2026-05-26 (V1)** |
-| **단계** | 설계(05-20) ✅ · 구현·E2E(05-23~26) ✅ — [`docs/development-log.md`](docs/development-log.md) |
+| **기간** | 2026-05-19 ~ **2026-05-27 (V1 완료)** |
+| **단계** | 설계(05-20) ✅ · 구현·E2E(05-23~27) ✅ — [`docs/development-log.md`](docs/development-log.md) |
 | **문서·아키텍처** | ✅ [`docs/`](docs/) · [`troubleshooting/`](troubleshooting/) |
 | **구현** | ✅ Phase 0~4 PoC 로컬 검증 |
 
@@ -27,7 +27,7 @@
 
 ## 현재 진행 상태
 
-**2026-05-19** 착수 · **05-20** 설계 · **05-23~26** Phase 1~3 구현·검증 ([`development-log.md`](docs/development-log.md)).
+**2026-05-19** 착수 · **05-20** 설계 · **05-23~27** Phase 0~4 PoC · **05-27 V1 마감** ([`development-log.md`](docs/development-log.md)).
 
 | Phase | 내용 | 상태 |
 |-------|------|------|

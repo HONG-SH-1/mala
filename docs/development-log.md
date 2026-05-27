@@ -2,7 +2,7 @@
 
 **~2026-05-22** 까지: 설계·VRAM PoC·리뷰는 기존 문서 그대로 ([`design-process.md`](design-process.md), [`opinion-infra-and-career.md`](opinion-infra-and-career.md), 05-19~20 트러블슈팅).
 
-**05-23 ~ 05-26:** 로컬 구현·검증 일지. 스크린샷 파일명의 날짜는 **이 일지의 작업일**과 맞춤 ([`demo.md`](demo.md) — 캡처 시각과 다를 수 있음).
+**05-23 ~ 05-27:** 로컬 구현·검증 일지 (**V1 마감 05-27**). 스크린샷 파일명의 날짜는 **이 일지의 작업일**과 맞춤 ([`demo.md`](demo.md) — 캡처 시각과 다를 수 있음).
 
 ---
 
@@ -171,14 +171,41 @@ Phase 1은 `docker compose`로 Redis를 띄우는 그림이었는데, PC에서 *
 
 ---
 
-## 4일 한눈에 (꾸준히 한 것처럼 읽히는 줄기)
+## 2026-05-27 — V1 마감 점검
+
+### 오늘 목표
+
+26일 PoC **동작 재확인** 후 V1 종료 — **SQLD(05-31)** 집중.
+
+### 스모크 결과
+
+| 항목 | 결과 |
+|------|------|
+| `check_paths` | PREFLIGHT OK · `USE_HERMES: True` |
+| `pytest tests` | **17 passed** |
+| `run_hermes_once` | **HERMES SUCCESS** (`TASK-a9198b0e`) — `fallback_search:1_hits`, `validate:ok` |
+| `run_hermes_once --ood` | **OOD OK** (`TASK-9546711b`) — `hermes:no_tool`, vault 검색 없음 |
+
+### 마감 조치
+
+- `run_hermes_once.py` — Windows CMD(cp949) **Unicode 출력** 폴백 (`_safe_print`)
+- **V1 선언** — Phase 0~4 PoC 완료 (Claude/Cursor 합의). 이후: 데모 스크립트 정리·UI는 **SQLD 이후**
+
+### 메모
+
+- 면접·이력서: **파이프라인 E2E 증명** · Hermes는 **폴백 RAG 그라운딩**으로 기술 (대규모 KB·완전 FC 아님)
+
+---
+
+## 5일 한눈에
 
 | 날짜 | 한 줄 |
 |------|--------|
 | 05-23 | 인프라 막힘 **정리·결정** (BIOS → Native Redis) |
 | 05-24 | Phase 1 **큐 E2E** |
 | 05-25 | Phase 2 **LangGraph** + 리소스 진단 |
-| 05-26 | Phase 3 **RAG** · **Ollama D:** · Phase 4 **Hermes PoC** (폴백 RAG) |
+| 05-26 | Phase 3 **RAG** · **Ollama D:** · Phase 4 **Hermes PoC** |
+| 05-27 | **V1 마감 스모크** → SQLD |
 
 ---
 
@@ -192,3 +219,5 @@ Phase 1은 `docker compose`로 Redis를 띄우는 그림이었는데, PC에서 *
 | 05-26 | 3 RAG (Ob Vault) | `TASK-4860f95a` |
 | 05-26 | 4 Hermes OOD | `TASK-9a2e30e5` |
 | 05-26 | 4 Hermes vault+RAG | `TASK-8f744eba` (대표) · `TASK-6ae4de11` |
+| 05-27 | 4 V1 smoke vault | `TASK-a9198b0e` |
+| 05-27 | 4 V1 smoke OOD | `TASK-9546711b` |

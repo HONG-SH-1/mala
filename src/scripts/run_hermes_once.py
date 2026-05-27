@@ -21,7 +21,24 @@ logging.basicConfig(
 )
 
 
+def _configure_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+def _safe_print(text: str) -> None:
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "utf-8"
+        print(text.encode(enc, errors="replace").decode(enc))
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdout()
     parser = argparse.ArgumentParser(description="MALA Hermes router E2E")
     parser.add_argument(
         "--task",
@@ -65,10 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"tool_step_count: {final.get('tool_step_count', 0)}")
     print(f"history: {final.get('history', [])}")
     if final.get("analysis_result"):
-        print("--- context preview ---")
-        print(final["analysis_result"][:400])
-    print("--- answer ---")
-    print(final.get("answer") or "(empty)")
+        _safe_print("--- context preview ---")
+        _safe_print(final["analysis_result"][:400])
+    _safe_print("--- answer ---")
+    _safe_print(final.get("answer") or "(empty)")
 
     if args.ood:
         used_search = any("search_vault" in h for h in final.get("history", []))

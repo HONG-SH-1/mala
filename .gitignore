@@ -22,3 +22,6 @@ index/
 # OS
 Thumbs.db
 .DS_Store
+
+# AI handoff (local only — not for repo)
+handoff/
