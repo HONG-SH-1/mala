@@ -55,6 +55,7 @@ def hermes_route_node(
         state["task_input"],
         settings,
         tool_step_count=state.get("tool_step_count", 0),
+        force_vault_rag=bool(state.get("force_vault_rag")),
     )
     if "intent" not in out:
         out["intent"] = Intent.ANALYZE.value
@@ -71,6 +72,21 @@ def hermes_route_node(
 
 
 def route_node(state: dict, *, store: TaskStatusStore) -> dict:
+    if state.get("force_vault_rag"):
+        route_decision = "needs_context"
+        intent = Intent.ANALYZE.value
+        _status(
+            state,
+            store,
+            "route",
+            {"route_decision": route_decision, "intent": intent, "mode": "study"},
+        )
+        return {
+            "route_decision": route_decision,
+            "intent": intent,
+            "history": ["route:needs_context:study"],
+        }
+
     text = state["task_input"].lower()
     if any(k in text for k in _RETRIEVAL_KEYWORDS):
         route_decision = "needs_context"

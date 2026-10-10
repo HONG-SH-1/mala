@@ -98,6 +98,7 @@ def run_task(
     use_queue: bool = True,
     settings: Settings | None = None,
     use_hermes_router: bool | None = None,
+    force_vault_rag: bool = False,
 ) -> AgentState:
     settings = settings or get_settings()
     if use_hermes_router is not None:
@@ -109,6 +110,8 @@ def run_task(
         task_input,
         max_retries=settings.graph_max_retries,
     )
+    if force_vault_rag:
+        initial["force_vault_rag"] = True
     store.update(
         initial["task_id"],
         {

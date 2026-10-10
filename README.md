@@ -217,6 +217,19 @@ python -m src.scripts.rag_once --task "vault 노트에서 MALA Phase 2가 무엇
 성공 시 `--- RAG SUCCESS ---` 와 `retrieve:N_hits` 히스토리가 보입니다.  
 질문에 `vault` / `노트` / `옵시디언` / `검색` 등이 있어야 `route → retrieve` 경로로 갑니다.
 
+### 4b. Study 모드 (V1.5 — 키워드 없이 항상 vault RAG)
+
+`.env`에 `OBSIDIAN_INCLUDE=06_Portfolio` 등 쉼표 구분 **상대 경로 접두사**로 인덱스·검색 범위를 좁힙니다. 실행 시 포함/제외 파일 수가 JSON 로그로 찍힙니다.
+
+```powershell
+python -m src.scripts.study_once --inline "이 폴더 노트에서 MALA 아키텍처 요약해줘"
+# worker 사용: 터미널 A python -m src.worker → study_once "질문"
+```
+
+답변 아래 `Sources:` 에 `파일 > 헤딩` 인용이 붙습니다.
+
+> **알려진 이슈:** `force_vault_rag`가 `AgentState`에 선언되지 않아 그래프 안에서 값이 전달되지 않음 — 현재 study 모드는 키워드 경로로 동작. 원인과 수정 계획은 [`docs/study/04-graph.md`](docs/study/04-graph.md), [`fix-later.md`](docs/study/fix-later.md) 8번.
+
 ---
 
 ## 빠른 시작 (Phase 4 — Hermes router, PoC)

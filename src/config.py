@@ -25,6 +25,7 @@ class Settings:
     task_status_prefix: str
     project_root: Path
     obsidian_vault_path: str
+    obsidian_include: str
     chroma_persist_dir: str
     chroma_collection: str
     index_manifest_path: str
@@ -55,6 +56,7 @@ def get_settings() -> Settings:
         task_status_prefix=os.getenv("TASK_STATUS_PREFIX", "task_status"),
         project_root=_ROOT,
         obsidian_vault_path=os.getenv("OBSIDIAN_VAULT_PATH", "vault_sample"),
+        obsidian_include=os.getenv("OBSIDIAN_INCLUDE", "").strip(),
         chroma_persist_dir=os.getenv("CHROMA_PERSIST_DIR", "data/chroma"),
         chroma_collection=os.getenv("CHROMA_COLLECTION", "mala_vault"),
         index_manifest_path=os.getenv(

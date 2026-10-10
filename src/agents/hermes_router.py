@@ -98,10 +98,24 @@ def plan_route(
     settings: Settings,
     *,
     tool_step_count: int = 0,
+    force_vault_rag: bool = False,
 ) -> dict:
     """
     Returns partial state update: route_decision, optional retrieved_chunks, tool_step_count, history.
     """
+    if force_vault_rag:
+        query = task_input.strip()[:200] or "study"
+        context, chunks, refs = _execute_search(query, settings)
+        return {
+            "route_decision": "needs_context",
+            "intent": "analyze",
+            "analysis_result": context,
+            "retrieved_chunks": chunks,
+            "context_refs": refs,
+            "tool_step_count": tool_step_count + 1,
+            "history": [f"hermes:study_force:{len(chunks)}_hits"],
+        }
+
     if tool_step_count >= settings.max_tool_steps:
         return {
             "route_decision": "simple",

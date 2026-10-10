@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,98 @@ from src.retrieval.rerank import rerank_hits
 
 logger = logging.getLogger(__name__)
 
-_SKIP_DIRS = {".obsidian", ".git", ".trash", "node_modules"}
+_SKIP_DIRS = {".obsidian", ".git", ".trash", "node_modules", "_raw"}
+
+
+def parse_include_prefixes(include_raw: str) -> list[str]:
+    """Comma-separated vault-relative path prefixes; empty = include all."""
+    if not include_raw.strip():
+        return []
+    return [p.strip().replace("\\", "/").strip("/") for p in include_raw.split(",") if p.strip()]
+
+
+def file_matches_include(rel_posix: str, prefixes: list[str]) -> bool:
+    if not prefixes:
+        return True
+    rel = rel_posix.replace("\\", "/")
+    for prefix in prefixes:
+        p = prefix.strip("/")
+        if rel == p or rel.startswith(p + "/"):
+            return True
+    return False
+
+
+@dataclass
+class VaultFilterStats:
+    vault_path: str
+    include_prefixes: list[str]
+    total_md: int
+    included: int
+    excluded: int
+    included_files: list[str]
+    excluded_files: list[str]
+
+    def to_log_dict(self, *, sample_limit: int = 8) -> dict:
+        return {
+            "vault": self.vault_path,
+            "include_prefixes": self.include_prefixes or ["(all)"],
+            "total_md": self.total_md,
+            "included": self.included,
+            "excluded": self.excluded,
+            "included_sample": self.included_files[:sample_limit],
+            "excluded_sample": self.excluded_files[:sample_limit],
+        }
+
+
+def compute_vault_filter_stats(
+    vault: Path,
+    settings: Settings | None = None,
+    *,
+    sample_limit: int = 8,
+) -> VaultFilterStats:
+    settings = settings or get_settings()
+    prefixes = parse_include_prefixes(settings.obsidian_include)
+    all_files: list[str] = []
+    included_files: list[str] = []
+    excluded_files: list[str] = []
+    for path in vault.rglob("*.md"):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(vault).as_posix()
+        all_files.append(rel)
+        if file_matches_include(rel, prefixes):
+            included_files.append(rel)
+        else:
+            excluded_files.append(rel)
+    return VaultFilterStats(
+        vault_path=str(vault),
+        include_prefixes=prefixes,
+        total_md=len(all_files),
+        included=len(included_files),
+        excluded=len(excluded_files),
+        included_files=included_files,
+        excluded_files=excluded_files,
+    )
+
+
+def log_vault_filter_stats(stats: VaultFilterStats) -> None:
+    print(json.dumps({"vault_filter": stats.to_log_dict()}, ensure_ascii=False))
+
+
+def format_citations(chunks: list[dict]) -> str:
+    if not chunks:
+        return ""
+    lines = ["--- sources ---"]
+    seen: set[tuple[str, str]] = set()
+    for chunk in chunks:
+        source = chunk.get("source", "?")
+        heading = chunk.get("heading", "?")
+        key = (source, heading)
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {source} > {heading}")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -50,10 +142,18 @@ def resolve_vault_path(settings: Settings) -> Path:
     return path.resolve()
 
 
-def iter_markdown_files(vault: Path) -> list[Path]:
+def iter_markdown_files(
+    vault: Path,
+    settings: Settings | None = None,
+) -> list[Path]:
+    settings = settings or get_settings()
+    prefixes = parse_include_prefixes(settings.obsidian_include)
     files: list[Path] = []
     for path in vault.rglob("*.md"):
         if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        rel = path.relative_to(vault).as_posix()
+        if not file_matches_include(rel, prefixes):
             continue
         files.append(path)
     return sorted(files)
