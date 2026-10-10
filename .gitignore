@@ -25,3 +25,21 @@ Thumbs.db
 
 # AI handoff (local only — not for repo)
 handoff/
+
+# Test & tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env variants (안전망 — .env.example 만 추적)
+.env.*
+!.env.example
+*.env.local
+
+# Logs
+*.log
+logs/
+
+# Chroma / SQLite (data/ 밖에 생성될 경우 대비)
+chroma/
+*.sqlite3
