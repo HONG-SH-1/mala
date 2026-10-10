@@ -18,7 +18,8 @@
 | [`system-overview-draft.md`](system-overview-draft.md) | 4축 요약 초안 | [`README.md`](../README.md) |
 | [`review-gemini-2026-05.md`](review-gemini-2026-05.md) | 외부 리뷰 ① — 리스크·Plan B | [`docs/scope.md`](../docs/scope.md) §6~7 |
 | [`review-claude-2026-05.md`](review-claude-2026-05.md) | 외부 리뷰 ② — VRAM·범위 | [`troubleshooting/2026-05-20-moe-vram.md`](../troubleshooting/2026-05-20-moe-vram.md) |
-| [`MALA_V2-vision.md`](MALA_V2-vision.md) | V2 확장안 (다이어트) | Phase 2+ · 구현 기준은 `scope`/`architecture` |
+| [`MALA_V2-vision.md`](MALA_V2-vision.md) | **V1.5/V2 브리프 — Claude·Gemini 3차 리뷰용 (2026-05-31)** | §8 답변 후 `docs/`·ADR 반영 |
+| ↑ (구 버전) | 하이브리드·모델 표 | §9 부록으로 유지 |
 
 ---
 
@@ -39,6 +40,16 @@
 
 - **상태:** Superseded (대체됨) — 아이디어 참고용  
 - **주의:** 35B MoE·vLLM+GGUF 혼합 등은 **최종 설계에서 제거**
+
+### `review-gemini-2026-05-31.md` · `review-claude-2026-05-31.md`
+
+- **용도:** Review #3 — V1.5/V2 (플러그·dogfood·reflection)
+- **채택:** 자체 구현 · 단일모델 역할 · study 1순위 · MCP 데모1 · Condenser·gate TTL · 태그/출처/가시화
+- **기각/수정:** OpenHands SDK · Modal 스텁 · 3모델 동시 · 인터페이스 선행(→ E2E 먼저)
+
+### `MALA_V2-vision.md` (2026-05-31)
+
+- **상태:** §6·§8 **합의 반영 완료** — 구현은 `docs/scope` 갱신 전까지 vision
 
 ---
 
