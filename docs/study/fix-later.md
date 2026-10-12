@@ -12,7 +12,7 @@
 | 5 | `keep_alive` 미지정 | 모든 Ollama 호출 | VRAM 정책이 코드로 강제되지 않음 |
 | 6 | 죽은 환경 변수 2개 | `.env.example:5-6` | 혼동 유발 |
 | 7 | qwen3 thinking 모드 기본 켜짐 | `src/worker.py:41-45` | 지연 · 컨텍스트 소모 |
-| 8 | **[우선순위 높음]** `force_vault_rag` 미선언 | `src/agents/state.py:9-25` | **기능 무효화** (study 모드 RAG 건너뜀) |
+| 8 | ~~**[우선순위 높음]** `force_vault_rag` 미선언~~ **수정됨 (2026-10-12)** | `src/agents/state.py:9-25` | **기능 무효화** (study 모드 RAG 건너뜀) |
 | 9 | rerank가 키워드 점수 우선 | `src/retrieval/rerank.py:38-50` | 의미 검색 무력화 |
 | 10 | 청크 상한 없음 + 임베더 2048 토큰 | `src/retrieval/chunker.py` · `nomic-embed-text` | 검색/프롬프트 비대칭 |
 | 11 | `delete_source`가 모든 예외를 삼킴 | `src/retrieval/chroma_store.py:46-50` | 구·신 청크 공존 (무로그) |
@@ -166,6 +166,8 @@ status: completed
 1. 컴파일된 그래프를 `invoke`하는 통합 테스트를 먼저 작성해 **실패를 확인** (키워드 없는 질문 → `history[0]`에 `study` 기대)
 2. `src/agents/state.py`의 `AgentState`에 `force_vault_rag: bool` 한 줄 추가
 3. 같은 테스트로 **통과 확인**
+
+**수정 결과 (2026-10-12):** 위 순서대로 진행. `tests/test_study_graph.py`가 `StateGraph(AgentState)`를 컴파일해 `invoke`하는 통합 테스트이며, 수정 전에는 키워드 없는 질문이 `route_decision="simple"`로 떨어져 **실패**했고, `AgentState`에 `force_vault_rag: bool`을 추가한 뒤(커밋 0f96f56) **통과**했습니다(전체 24개 테스트 통과, `langgraph 0.6.11`). Hermes 경로(`USE_HERMES_ROUTER=1`)의 통합 테스트는 Ollama 호출이 필요해 아직 추가하지 않았습니다.
 
 **함께 따라오는 것:** `hermes_route_node`(`src/agents/nodes.py:58`)도 `bool(state.get("force_vault_rag"))`를 넘기므로 항상 `False`가 되고, `plan_route:106-117`의 `force_vault_rag` 분기는 그래프 경유로 **도달 불가능**합니다. 2단계 수정으로 이 경로도 함께 살아나므로, 통합 테스트는 `USE_HERMES_ROUTER=1` 케이스도 같이 덮는 편이 좋습니다.
 
