@@ -23,3 +23,6 @@ class AgentState(TypedDict, total=False):
     last_error: str
     tool_step_count: int
     router_note: str
+
+    # study 모드 플래그. 여기 선언하지 않으면 LangGraph가 그래프 입력에서 조용히 버린다 (fix-later #8).
+    force_vault_rag: bool
