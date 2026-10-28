@@ -1,0 +1,34 @@
+# 평가 질문 예시 — vault_sample 기준이라 그대로 돌려 볼 수 있습니다.
+# 실제 질문은 이 파일을 eval/questions.yaml로 복사해서 쓰세요 (그 파일은 git에 올라가지 않음).
+#
+# id:               문항 번호. 겹치면 안 됨
+# question:         실제로 물어볼 문장
+# type:             in_notes (노트에 답이 있음) | not_in_notes (노트에 없음, '모른다'가 정답)
+# expected_sources: 답이 있는 노트 경로 (볼트 기준). in_notes는 필수
+# must_include:     답에 꼭 들어가야 할 단어. 전부 들어가면 자동으로 정답 처리
+#                   비워 두면 자동 판정 없이 수동 확인 대상이 됩니다
+#
+# 권장 구성: 20개 = in_notes 15개 + not_in_notes 5개
+# in_notes에는 키워드가 그대로 나오는 질문과, 다른 말로 바꿔 묻는 질문을 섞어 주세요.
+
+- id: q01
+  question: "MALA에서 노트를 자르는 기준이 뭐야?"
+  type: in_notes
+  expected_sources: ["Phase-3-RAG.md"]
+  must_include: ["heading"]
+
+- id: q02
+  question: "다시 색인할 때 바뀐 파일만 골라내는 방법은?"
+  type: in_notes
+  expected_sources: ["Phase-3-RAG.md"]
+  must_include: ["SHA-256"]
+
+- id: q03
+  question: "답변이 너무 짧으면 그래프는 어떻게 해?"
+  type: in_notes
+  expected_sources: ["Phase-2-Agent.md"]
+  must_include: ["GRAPH_MAX_RETRIES"]
+
+- id: q04
+  question: "MALA는 어떤 클라우드 GPU 요금제를 쓰고 있어?"
+  type: not_in_notes
