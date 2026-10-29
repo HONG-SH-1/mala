@@ -4,8 +4,8 @@
 
 | | |
 |---|---|
-| **기간** | 2026-05-19 ~ **2026-05-27 (V1 완료)** |
-| **단계** | 설계(05-20) ✅ · 구현·E2E(05-23~27) ✅ — [`docs/development-log.md`](docs/development-log.md) |
+| **기간** | 2026-05-19 ~ 진행 중 |
+| **단계** | V1(05-27) ✅ → V1.5 study 모드와 재검증(10월, 결함 16건) ✅ → 0단계 기준선(10-28) ✅ → 1단계 검색 개선 실험 진행 중 — [`docs/development-log.md`](docs/development-log.md) |
 | **문서·아키텍처** | ✅ [`docs/`](docs/) · [`troubleshooting/`](troubleshooting/) |
 | **구현** | ✅ Phase 0~4 PoC 로컬 검증 |
 
@@ -27,7 +27,7 @@
 
 ## 현재 진행 상태
 
-**2026-05-19** 착수 · **05-20** 설계 · **05-23~27** Phase 0~4 PoC · **05-27 V1 마감** ([`development-log.md`](docs/development-log.md)).
+**2026-05-19** 착수 · **05-20** 설계 · **05-23~27** Phase 0~4 PoC · **05-27 V1 마감** · 10월 V1.5 · 10-28 기준선 · 1단계 진행 중 ([`development-log.md`](docs/development-log.md)).
 
 | Phase | 내용 | 상태 |
 |-------|------|------|
@@ -41,6 +41,33 @@
 Phase 0  VRAM·RAM 실측 → Phase 1  Docker·Redis·큐 E2E
     → Phase 2  LangGraph → Phase 3  RAG E2E → Phase 4 (선택)
 ```
+
+---
+
+## 평가
+
+방법과 실행 명령: [`eval/README.md`](eval/README.md)
+
+평가 대상은 `docs/` 고정 사본입니다 ([ADR-004](docs/decisions/004-eval-docs-snapshot.md)). 질문 20개(노트에 답이 있는 것 15, 없는 것 5), 라벨 v2.
+
+**답변 기준선** — [`eval/results/20261028-2205_baseline-docs_rescored-v2.md`](eval/results/20261028-2205_baseline-docs_rescored-v2.md) (2회 반복, 비율은 1회차 기준)
+
+| 지표 | 값 |
+|---|---|
+| 정답률 (최종, 수동 우선) | 45% |
+| 노트에 있는 질문 정답률 | 27% |
+| 노트에 없는 질문에 '모른다' | 100% |
+| 출처 일치율 | 80% (파일 단위. 답 근거 청크 기준은 아래 검색 표 27%) |
+| 반복 시 최종 판정이 같은 비율 | 95% |
+
+**검색 기준선** — [`eval/results/20261029-2116_ret-v2-k3-keyword.md`](eval/results/20261029-2116_ret-v2-k3-keyword.md) (TOP_K 3, rerank keyword, 노트에 있는 질문 15개, 답변 모델 호출 없음)
+
+| 지표 | 값 |
+|---|---|
+| 답 근거 청크 포함률 (기대 출처, 주 지표) | 27% (4/15) |
+| 답 근거 청크 포함률 (아무 청크) | 33% (5/15) |
+| 출처 일치율 (파일 단위) | 80% (12/15) |
+| 가져온 청크 중 200자 미만 | 76% (34/45) |
 
 ---
 
@@ -70,7 +97,12 @@ Python · **Native Redis** (Phase 1) · Docker Compose (optional) · LangGraph �
 | [`docs/design-process.md`](docs/design-process.md) | AI 리뷰 채택/기각 |
 | [`docs/opinion-infra-and-career.md`](docs/opinion-infra-and-career.md) | 인프라·실무(WAS)·커리어 의견 공유 |
 | [`docs/demo.md`](docs/demo.md) | 데모·스크린샷 |
+| [`docs/development-log.md`](docs/development-log.md) | 개발 일지 |
+| [`docs/workflow-roles.md`](docs/workflow-roles.md) | 도구별 역할 정리 |
 | [`docs/decisions/`](docs/decisions/) | ADR |
+| [`docs/decisions/004-eval-docs-snapshot.md`](docs/decisions/004-eval-docs-snapshot.md) | ADR-004 평가 대상을 docs 고정 사본으로 |
+| [`docs/study/`](docs/study/) | 재학습 노트 (00, 02~06) |
+| [`docs/study/fix-later.md`](docs/study/fix-later.md) | 결함 목록 (현재 18건) |
 | [`troubleshooting/`](troubleshooting/) | 트러블슈팅 |
 | [`archive/`](archive/) | 초안·리뷰 로그 |
 
@@ -228,7 +260,7 @@ python -m src.scripts.study_once --inline "이 폴더 노트에서 MALA 아키�
 
 답변 아래 `Sources:` 에 `파일 > 헤딩` 인용이 붙습니다.
 
-> **알려진 이슈:** `force_vault_rag`가 `AgentState`에 선언되지 않아 그래프 안에서 값이 전달되지 않음 — 현재 study 모드는 키워드 경로로 동작. 원인과 수정 계획은 [`docs/study/04-graph.md`](docs/study/04-graph.md), [`fix-later.md`](docs/study/fix-later.md) 8번.
+> `force_vault_rag`가 그래프 안에서 전달되지 않던 문제는 2026-10-12에 고쳤습니다 ([`fix-later.md`](docs/study/fix-later.md) 8번).
 
 ---
 
@@ -277,7 +309,7 @@ python -m src.scripts.check_redis
 
 ---
 
-## 레포 구조 (목표)
+## 레포 구조
 
 ```
 MALA/
@@ -289,11 +321,13 @@ MALA/
 │   ├── schemas/
 │   ├── agents/           # LangGraph (Phase 2)
 │   ├── retrieval/        # 청킹, Chroma (Phase 3)
-│   ├── scripts/          # e2e_once, run_graph_once, rag_once, …
-│   ├── vault_sample/     # 데모용 MD
+│   ├── eval/             # 평가 실행·채점 (runner.py)
+│   ├── scripts/          # e2e_once, run_graph_once, rag_once, eval_run, …
 │   ├── recommend_model.py
 │   ├── config.py
 │   └── worker.py
+├── vault_sample/         # 데모용 MD
+├── eval/                 # 질문, 평가 설정, 결과 (eval/results/)
 ├── tests/
 ├── docs/
 ├── troubleshooting/
@@ -312,6 +346,10 @@ MALA/
 | 2026-05-24 | Phase 1 큐 E2E (`TASK-a7525fce`) |
 | 2026-05-25 | Phase 2 LangGraph (`TASK-a4cdc28b`) |
 | 2026-05-26 | Phase 3 RAG·증분 검증 (`TASK-3458907b`) — **일지:** [`development-log.md`](docs/development-log.md) |
+| 2026-05-27 | V1 마감 |
+| 2026-10-10 | V1.5 study 모드, 재학습 노트, 결함 목록 16건 |
+| 2026-10-12 | `force_vault_rag` 수정 (fix-later 8번), study 모드 통합 테스트 |
+| 2026-10-28~29 | 0단계 기준선 측정, ADR-004, 질문 라벨 v2, 검색만 재는 평가 모드 |
 
 초기 마스터플랜: [`archive/`](archive/)
 
