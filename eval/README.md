@@ -11,11 +11,28 @@
 권장 구성은 20개입니다. 노트에 답이 있는 질문 15개, 노트에 없는 질문 5개입니다.
 노트에 없는 질문은 "모른다"고 답해야 정답입니다.
 
+## 라벨 판
+
+지금 질문 파일은 **라벨 v2**(2026-10-29)입니다. 1단계 실험 중에는 라벨을 바꾸지 않습니다.
+
+- `expected_sources`: 답이 그 줄에 직접 있는 문서만 넣습니다. 링크나 언급만 있는 문서는 뺍니다.
+- `must_include`: 항목은 모두 있어야 합니다. 항목이 목록이면 그중 하나만 있으면 됩니다 (같은 뜻의 다른 표기). 자동 판정과 근거 청크 판정에 똑같이 씁니다.
+
+```yaml
+must_include: [["7559", "7,559"]]      # 항목 1개, 표기 2개
+must_include: ["retrieve", "validate"] # 항목 2개
+```
+
+- v1과 차이: q01~q05, q07, q09, q10 기대 출처 추가, q04·q07·q08 다른 표기 추가. v1 파일은 커밋 4695824에 있습니다.
+- 결과 `.md` 머리에 질문 파일 sha256 앞 8자리가 찍힙니다. v2는 `68e6aebc`입니다.
+- 라벨을 바꾸면 기준선도 재채점합니다 (`--suffix _rescored-v2`처럼 이전 결과를 덮어쓰지 않게).
+
 ## 평가 대상 (docs 고정 사본)
 
 기준선은 레포 `docs/`를 고정 복사한 `data/eval_corpus/docs-20261028/`로 잽니다.
 사본은 2e55c5b 시점의 docs/에서 만든다 (`data/`는 git에 없으므로 다른 PC에서는 이 커밋에서 다시 복사).
 `.env`는 그대로 두고, 평가 전용 환경변수는 `eval/env_docs.ps1`에 모아 둡니다.
+답변 모델, 임베딩 모델, `GRAPH_MAX_RETRIES`, `RAG_TOP_K`, `RAG_RERANK`도 여기서 정합니다. 기준선 때 쓰인 값을 적은 것이라 동작은 같습니다. `.env`가 바뀌어도 기준선 조건은 그대로 남습니다.
 기존 `mala_vault` 색인과 `data/index_manifest.json`은 쓰지 않습니다.
 
 - 레포 루트(`D:\PersonProject\MALA`)에서 실행합니다 (`CHROMA_PERSIST_DIR`가 실행 위치 기준).
@@ -43,6 +60,26 @@ python -m src.scripts.eval_run --questions eval/questions.yaml --label baseline 
 
 결과는 `data/eval/<날짜-시각>_<label>.jsonl`과 `.md`로 남습니다.
 경로는 `study_once --inline`과 같습니다(항상 노트 검색, worker 없이 직접 호출).
+
+## 검색만 재기
+
+답변 모델과 Redis 없이 검색만 잽니다. 질문 임베딩 때문에 Ollama는 켜져 있어야 합니다.
+in_notes 질문만 1회 돕니다 (기준선에서 1·2회차 검색 결과가 같았음).
+
+```powershell
+. .\eval\env_docs.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --retrieval-only --label ret-k3-keyword
+. .\eval\env_docs.ps1; $env:RAG_TOP_K = "5"; $env:RAG_RERANK = "off"; python -m src.scripts.eval_run --questions eval/questions.yaml --retrieval-only --label ret-k5-off
+```
+
+| 지표 | 어떻게 |
+| --- | --- |
+| 답 근거 청크 포함률 (기대 출처, 주 지표) | 기대 출처 파일의 청크 하나에 `must_include`가 다 있는지 |
+| 답 근거 청크 포함률 (아무 청크) | 아무 청크 하나에 `must_include`가 다 있는지. 흔한 단어는 상관없는 청크에도 나와 부풀 수 있음 |
+| 출처 일치율 | 파일 단위. 제목만 있는 청크를 가져와도 맞다고 셈 |
+| 200자 미만 청크 비율 | 가져온 청크 중 짧은 청크 |
+
+판정은 프롬프트에 실제로 들어가는 글(`format_context`, 본문 1200자까지)로 합니다.
+`RAG_RERANK`는 `keyword`(기본, 지금 동작)와 `off`(벡터 거리순 그대로)입니다.
 
 ## 재는 것
 
@@ -87,4 +124,6 @@ python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.json
 `eval_run`은 `data/eval/`(git 밖)에 씁니다. 기준선처럼 남길 결과는 `eval/results/`로 옮겨 git에 올립니다.
 공개 docs 사본으로 잰 결과만 올립니다. 다른 PC에서도 같은 결과로 재채점할 수 있습니다.
 
-- `20261028-2205_baseline-docs.*` — 0단계 기준선 (원본, 사람 판정, 재채점)
+- `20261028-2205_baseline-docs.*` — 0단계 기준선 (원본, 사람 판정, 재채점 v1 `_rescored`, v2 `_rescored-v2`)
+- `20261029-2109_ret-*` — 검색만 재기 4개 조합, 라벨 v1
+- `20261029-2116_ret-v2-*` — 검색만 재기 4개 조합, 라벨 v2 (`ret-v2-k3-keyword`가 검색 기준선)
