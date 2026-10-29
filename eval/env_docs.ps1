@@ -10,3 +10,12 @@ $env:CHROMA_PERSIST_DIR  = "data/chroma_eval"
 $env:CHROMA_COLLECTION   = "mala_eval_docs"
 $env:INDEX_MANIFEST_PATH = "data/eval_manifest_docs.json"
 $env:INDEX_FAILURES_PATH = "data/eval_index_failures.jsonl"
+
+# 기준선(20261028-2205_baseline-docs) 때 쓰인 값을 적어 둔 것. 동작은 같다.
+# 모델과 TOP_K는 결과 .md 머리, GRAPH_MAX_RETRIES는 .env(마지막 수정 2026-05-26)에서 확인.
+# 실험할 때는 이 스크립트 뒤에서 덮어쓴다. 예: . .\eval\env_docs.ps1; $env:RAG_TOP_K = "5"; ...
+$env:OLLAMA_MODEL        = "qwen3:8b"
+$env:OLLAMA_EMBED_MODEL  = "nomic-embed-text"
+$env:GRAPH_MAX_RETRIES   = "2"
+$env:RAG_TOP_K           = "3"
+$env:RAG_RERANK          = "keyword"
