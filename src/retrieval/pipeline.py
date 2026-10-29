@@ -285,6 +285,8 @@ class VaultRetriever:
         k = top_k or self._settings.rag_top_k
         pool = min(max(k * 4, k), 20)
         candidates = self._store.search(query, pool)
+        if self._settings.rag_rerank == "off":
+            return candidates[:k]  # Chroma가 돌려준 거리순 그대로
         return rerank_hits(query, candidates, k)
 
     def format_context(self, hits: list[SearchHit]) -> str:

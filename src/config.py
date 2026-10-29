@@ -35,9 +35,17 @@ class Settings:
     ollama_router_model: str
     max_tool_steps: int
     use_hermes_router: bool
+    # keyword: 키워드 점수로 다시 정렬 (기본, 지금 동작) | off: 벡터 거리순 그대로
+    rag_rerank: str = "keyword"
+
+
+RAG_RERANK_MODES = ("keyword", "off")
 
 
 def get_settings() -> Settings:
+    rag_rerank = os.getenv("RAG_RERANK", "keyword").strip().lower() or "keyword"
+    if rag_rerank not in RAG_RERANK_MODES:
+        raise ValueError(f"RAG_RERANK은 {RAG_RERANK_MODES} 중 하나여야 합니다: {rag_rerank!r}")
     return Settings(
         redis_host=os.getenv("REDIS_HOST", "localhost"),
         redis_port=int(os.getenv("REDIS_PORT", "6379")),
@@ -73,4 +81,5 @@ def get_settings() -> Settings:
         max_tool_steps=int(os.getenv("MAX_TOOL_STEPS", "5")),
         use_hermes_router=os.getenv("USE_HERMES_ROUTER", "0").lower()
         in ("1", "true", "yes"),
+        rag_rerank=rag_rerank,
     )
