@@ -121,3 +121,26 @@ def test_main_writes_rescored_files_and_keeps_original(tmp_path):
     assert [r["correct"] for r in rows] == [True, True, False, False]
     md = (tmp_path / "run_rescored.md").read_text(encoding="utf-8")
     assert "| q1 | in_notes | O | O/O | O/X | O/X |" in md
+
+
+def test_main_suffix_keeps_earlier_rescore(tmp_path):
+    results = tmp_path / "run.jsonl"
+    results.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in RECORDS), encoding="utf-8"
+    )
+    questions = tmp_path / "q.yaml"
+    questions.write_text(
+        "- {id: q1, question: '?', type: in_notes, expected_sources: [a.md], "
+        "must_include: [[Ollama, vLLM]]}\n"
+        "- {id: q2, question: '?', type: not_in_notes}\n",
+        encoding="utf-8",
+    )
+    old = tmp_path / "run_rescored.md"
+    old.write_text("v1", encoding="utf-8")
+
+    rc = eval_rescore.main([str(results), "--questions", str(questions), "--suffix", "_rescored-v2"])
+
+    assert rc == 0
+    assert old.read_text(encoding="utf-8") == "v1"
+    md = (tmp_path / "run_rescored-v2.md").read_text(encoding="utf-8")
+    assert "sha256 " in md and "sha256 -" not in md

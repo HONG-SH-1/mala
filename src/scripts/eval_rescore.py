@@ -1,7 +1,7 @@
 """평가 재채점 — 모델을 다시 돌리지 않고, 저장된 결과 jsonl을 다시 판정한다.
 
 질문 파일(expected_sources, must_include)이나 수동 판정이 바뀌었을 때 쓴다.
-원래 jsonl은 그대로 두고, 같은 폴더에 <이름>_rescored.jsonl과 .md를 새로 쓴다.
+원래 jsonl은 그대로 두고, 같은 폴더에 <이름>_rescored.jsonl과 .md를 새로 쓴다 (--suffix로 바꿈).
 
     python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.jsonl \
         --questions eval/questions.yaml \
@@ -28,6 +28,7 @@ from src.eval.runner import (
     _pct,
     _rate,
     auto_verdict,
+    file_sha8,
     load_questions,
     source_hit,
     summarize,
@@ -141,7 +142,7 @@ def render_markdown(meta: dict, summary: dict, records: list[dict]) -> str:
         f"# 재채점 결과: {meta['source']}",
         "",
         f"- 재채점 시각: {meta['rescored_at']}",
-        f"- 질문 파일: {meta['questions']}",
+        f"- 질문 파일: {meta['questions']} (sha256 {meta.get('questions_sha8') or '-'})",
         f"- 수동 판정: {meta['manual'] or '없음'}",
         f"- 질문 {summary['questions']}개 x {summary['repeats']}회",
         "- 응답 시간과 토큰은 다시 재지 않았습니다. 원래 결과 .md를 보세요.",
@@ -198,6 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("results", help="eval_run이 남긴 결과 jsonl")
     parser.add_argument("--questions", default="eval/questions.yaml")
     parser.add_argument("--manual", default=None, help="수동 판정 yaml (선택)")
+    parser.add_argument(
+        "--suffix",
+        default="_rescored",
+        help="결과 파일 이름 끝 (기본 _rescored). 라벨이 바뀌면 예: _rescored-v2",
+    )
     args = parser.parse_args(argv)
 
     src = Path(args.results)
@@ -214,12 +220,13 @@ def main(argv: list[str] | None = None) -> int:
         "source": src.name,
         "rescored_at": datetime.now().isoformat(timespec="seconds"),
         "questions": args.questions,
+        "questions_sha8": file_sha8(args.questions),
         "manual": args.manual,
     }
     report = render_markdown(meta, summarize_rescored(rescored), rescored)
 
-    out_jsonl = src.with_name(f"{src.stem}_rescored.jsonl")
-    out_md = src.with_name(f"{src.stem}_rescored.md")
+    out_jsonl = src.with_name(f"{src.stem}{args.suffix}.jsonl")
+    out_md = src.with_name(f"{src.stem}{args.suffix}.md")
     write_jsonl(out_jsonl, rescored)
     out_md.write_text(report, encoding="utf-8")
 

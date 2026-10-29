@@ -7,6 +7,7 @@ study 모드(--inline)와 같은 경로로 질문을 보내고, Ollama 호출만
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import re
@@ -52,7 +53,8 @@ class Question:
     question: str
     type: str
     expected_sources: list[str] = field(default_factory=list)
-    must_include: list[str] = field(default_factory=list)
+    # 항목은 모두 있어야 한다. 항목이 목록이면 그중 하나만 있으면 된다 (같은 뜻의 다른 표기).
+    must_include: list[str | list[str]] = field(default_factory=list)
 
 
 def load_questions(path: str | Path) -> list[Question]:
@@ -73,7 +75,7 @@ def load_questions(path: str | Path) -> list[Question]:
         text = str(item.get("question", "")).strip()
         qtype = str(item.get("type", "")).strip()
         sources = [str(s) for s in item.get("expected_sources") or []]
-        keywords = [str(k) for k in item.get("must_include") or []]
+        keywords, bad = _parse_must_include(item.get("must_include"))
 
         if not qid:
             errors.append(f"{where}: id가 없습니다.")
@@ -86,6 +88,10 @@ def load_questions(path: str | Path) -> list[Question]:
             errors.append(
                 f"{where} ({qid}): type은 {QUESTION_TYPES} 중 하나여야 합니다."
             )
+        if bad:
+            errors.append(
+                f"{where} ({qid}): must_include 항목은 문자열 또는 비어 있지 않은 문자열 목록이어야 합니다."
+            )
         if qtype == "in_notes" and not sources:
             errors.append(
                 f"{where} ({qid}): in_notes 질문은 expected_sources가 필요합니다."
@@ -95,6 +101,40 @@ def load_questions(path: str | Path) -> list[Question]:
     if errors:
         raise ValueError("질문 파일 오류:\n- " + "\n- ".join(errors))
     return questions
+
+
+def _parse_must_include(raw) -> tuple[list[str | list[str]], bool]:
+    """must_include를 읽는다. 항목은 문자열 또는 문자열 목록. 형식이 틀리면 (.., True)."""
+    items: list[str | list[str]] = []
+    bad = False
+    for k in raw or []:
+        if isinstance(k, list):
+            alts = [str(a) for a in k if str(a).strip()]
+            if not alts or len(alts) != len(k):
+                bad = True
+            items.append(alts)
+        elif isinstance(k, (dict, type(None))) or not str(k).strip():
+            bad = True
+        else:
+            items.append(str(k))
+    return items, bad
+
+
+def _has_all(keywords: list[str | list[str]], text: str) -> bool:
+    """항목이 모두 text에 있는지. 목록 항목은 그중 하나만 있으면 된다. 대소문자 무시."""
+    low = text.lower()
+    return all(
+        any(a.lower() in low for a in (k if isinstance(k, list) else [k]))
+        for k in keywords
+    )
+
+
+def file_sha8(path: str | Path) -> str | None:
+    """질문 파일 내용의 sha256 앞 8자리. 결과가 어느 라벨로 잰 것인지 남기는 용도."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:8]
+    except OSError:
+        return None
 
 
 def strip_think(text: str) -> str:
@@ -123,7 +163,7 @@ def auto_verdict(q: Question, answer: str) -> bool | None:
         return any(m.lower() in text for m in DONT_KNOW_MARKERS)
     if not q.must_include:
         return None
-    return all(k.lower() in text for k in q.must_include)
+    return _has_all(q.must_include, text)
 
 
 class OllamaRecorder:
@@ -330,8 +370,12 @@ def run_meta(settings: Settings, *, label: str, questions_path: str) -> dict:
         "answer_model": settings.ollama_model,
         "embed_model": settings.ollama_embed_model,
         "rag_top_k": settings.rag_top_k,
+        "rag_rerank": settings.rag_rerank,
+        "vault": settings.obsidian_vault_path,  # 설정값 그대로 (절대 경로로 풀지 않음)
+        "collection": settings.chroma_collection,
         "graph_max_retries": settings.graph_max_retries,
         "questions_file": questions_path,
+        "questions_sha8": file_sha8(questions_path),
         "python": platform.python_version(),
     }
 
@@ -362,7 +406,9 @@ def render_markdown(meta: dict, summary: dict, records: list[dict]) -> str:
         f"- 커밋: {meta['git_commit']}"
         + (" (src에 커밋 안 된 변경 있음)" if meta["git_dirty_src"] else ""),
         f"- 답변 모델: {meta['answer_model']}, 임베딩: {meta['embed_model']}, "
-        f"TOP_K: {meta['rag_top_k']}",
+        f"TOP_K: {meta['rag_top_k']}, rerank: {meta.get('rag_rerank', '-')}",
+        f"- 볼트: {meta.get('vault', '-')}, 컬렉션: {meta.get('collection', '-')}",
+        f"- 질문 파일: {meta.get('questions_file', '-')} (sha256 {meta.get('questions_sha8') or '-'})",
         f"- 질문 {summary['questions']}개 x {summary['repeats']}회",
         "",
         "| 지표 | 값 |",
@@ -413,3 +459,173 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+# --- 검색만 재기 (--retrieval-only) -------------------------------------------
+# qwen3 없이 검색 결과만 본다. 판정은 실제 프롬프트에 들어가는 글(format_context)로 한다.
+
+SHORT_CHUNK_CHARS = 200
+
+
+def evidence_ranks(q: Question, chunks: list[dict]) -> tuple[int | None, int | None]:
+    """must_include가 한 청크에 다 들어 있는 첫 순위(1부터). (느슨, 엄격)
+
+    느슨: 아무 청크. 엄격: 기대 출처 파일의 청크만.
+    흔한 단어(Ollama, Redis 등)는 상관없는 청크에도 나오므로 엄격한 쪽이 주 지표다.
+    """
+    if not q.must_include:
+        return None, None
+    loose = strict = None
+    for rank, c in enumerate(chunks, 1):
+        if not _has_all(q.must_include, c["context"]):
+            continue
+        if loose is None:
+            loose = rank
+        if strict is None and source_hit(q.expected_sources, [c["source"]]):
+            strict = rank
+    return loose, strict
+
+
+def default_search_fn(settings: Settings) -> Callable[[str], list[dict]]:
+    """VaultRetriever.search를 그대로 부르고, 청크마다 프롬프트에 들어갈 글을 붙인다."""
+    from src.retrieval.pipeline import VaultRetriever
+
+    retriever = VaultRetriever(settings)
+
+    def _search(text: str) -> list[dict]:
+        return [
+            {
+                "chunk_id": h.chunk_id,
+                "source": h.source,
+                "heading": h.heading,
+                "chars": len(h.text),
+                "distance": h.distance,
+                "context": retriever.format_context([h]),
+            }
+            for h in retriever.search(text)
+        ]
+
+    return _search
+
+
+def run_retrieval_one(
+    q: Question, search_fn: Callable[[str], list[dict]], *, label: str
+) -> dict:
+    start = time.perf_counter()
+    error = None
+    try:
+        chunks = search_fn(q.question)
+    except Exception as exc:  # 한 문항이 실패해도 나머지는 계속 잰다
+        chunks = []
+        error = str(exc)
+    wall_ms = round((time.perf_counter() - start) * 1000)
+
+    sources = [c["source"] for c in chunks]
+    loose, strict = evidence_ranks(q, chunks)
+    return {
+        "label": label,
+        "id": q.id,
+        "type": q.type,
+        "question": q.question,
+        "retrieved": [
+            {k: c[k] for k in ("chunk_id", "source", "heading", "chars", "distance")}
+            for c in chunks
+        ],
+        "retrieved_sources": sources,
+        "source_hit": source_hit(q.expected_sources, sources),
+        "evidence_judged": bool(q.must_include),
+        "evidence_rank_expected": strict,
+        "evidence_rank_any": loose,
+        "wall_ms": wall_ms,
+        "error": error,
+    }
+
+
+def run_retrieval_eval(
+    questions: list[Question],
+    *,
+    search_fn: Callable[[str], list[dict]],
+    label: str,
+    on_record: Callable[[dict], None] | None = None,
+) -> list[dict]:
+    """in_notes 질문만 1회 돌린다 (검색은 반복해도 같았음, 2026-10-28 기준선)."""
+    records = []
+    for q in questions:
+        if q.type != "in_notes":
+            continue
+        rec = run_retrieval_one(q, search_fn, label=label)
+        records.append(rec)
+        if on_record:
+            on_record(rec)
+    return records
+
+
+def _count(values: list[bool]) -> tuple[float | None, int, int]:
+    return (sum(values) / len(values) if values else None), sum(values), len(values)
+
+
+def summarize_retrieval(records: list[dict]) -> dict:
+    judged = [r for r in records if r["evidence_judged"]]  # must_include 없는 문항은 뺀다
+    chunks = [c for r in records for c in r["retrieved"]]
+    hit = _count([r["source_hit"] for r in records])
+    strict = _count([r["evidence_rank_expected"] is not None for r in judged])
+    loose = _count([r["evidence_rank_any"] is not None for r in judged])
+    short = _count([c["chars"] < SHORT_CHUNK_CHARS for c in chunks])
+    return {
+        "questions": len(records),
+        "source_hit": hit,
+        "evidence_expected": strict,
+        "evidence_any": loose,
+        "short_chunks": short,
+        "errors": sum(1 for r in records if r["error"]),
+    }
+
+
+def _frac(t: tuple[float | None, int, int]) -> str:
+    rate, n, total = t
+    return f"{_pct(rate)} ({n}/{total})"
+
+
+def render_retrieval_markdown(meta: dict, summary: dict, records: list[dict]) -> str:
+    lines = [
+        f"# 검색 평가: {meta['label']}",
+        "",
+        f"- 시각: {meta['started_at']}",
+        f"- 커밋: {meta['git_commit']}"
+        + (" (src에 커밋 안 된 변경 있음)" if meta["git_dirty_src"] else ""),
+        f"- 볼트: {meta['vault']}, 컬렉션: {meta['collection']}",
+        f"- TOP_K: {meta['rag_top_k']}, rerank: {meta['rag_rerank']}, 임베딩: {meta['embed_model']}",
+        f"- 질문: {meta['questions_file']} (sha256 {meta.get('questions_sha8') or '-'})의 "
+        f"in_notes {summary['questions']}개 x 1회 (답변 모델 호출 없음)",
+        "",
+        "| 지표 | 값 |",
+        "| --- | --- |",
+        f"| 답 근거 청크 포함률 (기대 출처, 주 지표) | {_frac(summary['evidence_expected'])} |",
+        f"| 답 근거 청크 포함률 (아무 청크) | {_frac(summary['evidence_any'])} |",
+        f"| 출처 일치율 (파일 단위) | {_frac(summary['source_hit'])} |",
+        f"| 가져온 청크 중 {SHORT_CHUNK_CHARS}자 미만 | {_frac(summary['short_chunks'])} |",
+        f"| 검색 오류 | {summary['errors']}개 |",
+        "",
+        "## 문항별",
+        "",
+        "근거 칸은 must_include가 다 들어 있는 첫 청크의 순위입니다 (다른 표기 중 하나면 됨). 없으면 X.",
+        "",
+        "| id | 출처 | 근거(기대 출처) | 근거(아무 청크) | 가져온 청크 (출처:글자 수) |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    mark = {True: "O", False: "X", None: "-"}
+
+    def _rank(v):
+        return "X" if v is None else str(v)
+
+    for r in records:
+        got = ", ".join(f"{c['source']}:{c['chars']}" for c in r["retrieved"]) or r["error"] or "-"
+        lines.append(
+            f"| {r['id']} | {mark[r['source_hit']]} | {_rank(r['evidence_rank_expected'])} | "
+            f"{_rank(r['evidence_rank_any'])} | {got} |"
+        )
+    lines += [
+        "",
+        "판정은 프롬프트에 실제로 들어가는 글(format_context, 본문 1200자까지)로 합니다.",
+    ]
+    return "\n".join(lines) + "\n"

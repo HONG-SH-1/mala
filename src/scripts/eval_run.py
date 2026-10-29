@@ -5,6 +5,9 @@
 
     # 기준선 측정 (데스크톱, Ollama와 Redis 실행 중)
     python -m src.scripts.eval_run --questions eval/questions.yaml --label baseline --repeat 2
+
+    # 검색만 재기 (답변 모델과 Redis 없이, 임베딩 때문에 Ollama는 필요)
+    python -m src.scripts.eval_run --questions eval/questions.yaml --retrieval-only --label ret-k3-keyword
 """
 
 from __future__ import annotations
@@ -22,11 +25,15 @@ from src.config import get_settings
 from src.eval.runner import (
     _norm_path,
     default_run_fn,
+    default_search_fn,
     load_questions,
     render_markdown,
+    render_retrieval_markdown,
     run_eval,
     run_meta,
+    run_retrieval_eval,
     summarize,
+    summarize_retrieval,
     write_jsonl,
 )
 
@@ -60,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0, help="앞에서 N개만 (시험용)")
     parser.add_argument("--out-dir", default="data/eval")
     parser.add_argument("--dry-run", action="store_true", help="질문 파일 검사만 하고 끝냄")
+    parser.add_argument(
+        "--retrieval-only",
+        action="store_true",
+        help="답변 모델 없이 검색만 잰다 (in_notes 질문, 1회)",
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -90,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
     if meta["git_dirty_src"]:
         print("  주의: src에 커밋 안 된 변경이 있습니다. 기준선이면 커밋 상태에서 재는 게 맞습니다.")
 
+    if args.retrieval_only:
+        return _run_retrieval_only(args, questions, settings, meta)
+
     total = len(questions) * args.repeat
     done = 0
 
@@ -108,13 +123,45 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = summarize(records)
 
+    out_dir = _out_dir(args, settings)
+    stem = f"{datetime.now():%Y%m%d-%H%M}_{args.label}"
+    write_jsonl(out_dir / f"{stem}.jsonl", records)
+    report = render_markdown(meta, summary, records)
+    (out_dir / f"{stem}.md").write_text(report, encoding="utf-8")
+
+    print()
+    print(report)
+    print(f"저장: {out_dir / stem}.jsonl, .md")
+    return 0
+
+
+def _out_dir(args, settings) -> Path:
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = settings.project_root / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def _run_retrieval_only(args, questions, settings, meta) -> int:
+    if args.repeat != 1:
+        print("  주의: --retrieval-only는 1회만 돕니다 (--repeat 무시).")
+    print(f"  rerank: {settings.rag_rerank}, TOP_K: {settings.rag_top_k}")
+
+    def _progress(rec: dict) -> None:
+        rank = rec["evidence_rank_expected"]
+        print(f"  {rec['id']} 출처 {'O' if rec['source_hit'] else 'X'} 근거 {rank or 'X'}")
+
+    records = run_retrieval_eval(
+        questions,
+        search_fn=default_search_fn(settings),
+        label=args.label,
+        on_record=_progress,
+    )
+    out_dir = _out_dir(args, settings)
     stem = f"{datetime.now():%Y%m%d-%H%M}_{args.label}"
     write_jsonl(out_dir / f"{stem}.jsonl", records)
-    report = render_markdown(meta, summary, records)
+    report = render_retrieval_markdown(meta, summarize_retrieval(records), records)
     (out_dir / f"{stem}.md").write_text(report, encoding="utf-8")
 
     print()
