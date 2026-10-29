@@ -5,8 +5,8 @@
 
 ## 질문 파일
 
-`questions.example.yaml`을 `questions.yaml`로 복사해서 내 노트 기준으로 씁니다.
-`questions.yaml`은 내 노트 내용이 들어가므로 git에 올라가지 않습니다.
+`questions.yaml`은 공개 `docs/` 사본을 기준으로 쓴 질문이라 git에 올립니다.
+`questions.example.yaml`은 형식 예시입니다. 개인 볼트로 질문을 만들면 내용이 노트에서 나오므로 git에 올리지 않습니다.
 
 권장 구성은 20개입니다. 노트에 답이 있는 질문 15개, 노트에 없는 질문 5개입니다.
 노트에 없는 질문은 "모른다"고 답해야 정답입니다.
@@ -55,5 +55,36 @@ python -m src.scripts.eval_run --questions eval/questions.yaml --label baseline 
 | 재시도 | 검증에 걸려 Ollama를 두 번 이상 부른 질문 수 |
 | 흔들림 | `--repeat 2` 이상일 때, 같은 질문의 판정과 답이 같은지 |
 
-자동 판정은 키워드 기준이라 거칩니다. 애매한 문항은 jsonl의 `manual_correct` 칸을 직접 채웁니다.
 첫 문항은 모델 로드 시간이 섞일 수 있어 `load_ms`를 따로 남깁니다.
+
+## 판정과 재채점
+
+자동 판정은 키워드 기준이라 거칩니다. 사람이 볼 때 규칙은 이렇습니다.
+
+- in_notes: 키워드가 있어도 결론이 "모른다/확인할 수 없다"면 X.
+- not_in_notes: 문서에 없는 값을 실측처럼 말하면 X.
+
+사람 판정은 결과 jsonl을 고치지 않고 따로 `<결과 이름>.manual.yaml`에 적습니다.
+
+```yaml
+q08: true            # 전 회차
+q18: [true, false]   # 회차별 (1회차, 2회차)
+```
+
+질문 파일이나 사람 판정이 바뀌면 모델을 다시 돌리지 않고 재채점합니다.
+`source_hit`, `auto_correct`를 다시 계산하고, 사람 판정이 있으면 그것을 최종 판정으로 씁니다.
+
+```powershell
+python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.jsonl `
+    --questions eval/questions.yaml `
+    --manual eval/results/20261028-2205_baseline-docs.manual.yaml
+```
+
+원래 jsonl은 그대로 두고 같은 폴더에 `_rescored.jsonl`, `_rescored.md`를 씁니다.
+
+## 결과 보관
+
+`eval_run`은 `data/eval/`(git 밖)에 씁니다. 기준선처럼 남길 결과는 `eval/results/`로 옮겨 git에 올립니다.
+공개 docs 사본으로 잰 결과만 올립니다. 다른 PC에서도 같은 결과로 재채점할 수 있습니다.
+
+- `20261028-2205_baseline-docs.*` — 0단계 기준선 (원본, 사람 판정, 재채점)

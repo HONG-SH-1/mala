@@ -1,0 +1,12 @@
+# 20261028-2205_baseline-docs 수동 판정 (2026-10-29)
+# 값 하나면 전 회차, 목록이면 회차별 (1회차, 2회차)
+# 규칙: in_notes는 키워드가 있어도 결론이 "모른다/확인할 수 없다"면 X
+q01: false
+q03: false  # 결론이 "모른다"
+q05: false
+q08: true
+q12: false
+q15: false
+q16: true
+q17: true
+q18: [true, false]

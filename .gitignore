@@ -43,6 +43,3 @@ logs/
 # Chroma / SQLite (data/ 밖에 생성될 경우 대비)
 chroma/
 *.sqlite3
-
-# 평가 질문 (내 노트 내용이 들어가므로 로컬에만)
-eval/questions.yaml

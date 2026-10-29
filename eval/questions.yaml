@@ -1,0 +1,118 @@
+# 0단계 기준선 질문 — 평가 대상: data/eval_corpus/docs-20261028 (docs/ 고정 사본, 2026-10-28)
+# 실행 환경변수: eval/env_docs.ps1
+# 구성: in_notes 15개(서로 다른 문서 10개, 그대로 8 / 다른 말 7) + not_in_notes 5개
+# ⚠ 표시: 맞게 답해도 키워드 자동 판정이 틀릴 수 있어 manual_correct로 확인할 문항
+
+# --- in_notes ---
+
+- id: q01  # 그대로
+  question: "ADR-001에서 Phase 1 추론 엔진으로 무엇을 정했어?"
+  type: in_notes
+  expected_sources: ["decisions/001-inference-engine.md"]
+  must_include: ["Ollama"]
+
+- id: q02  # 다른 말
+  question: "이 PC에서 도커를 못 쓰게 된 원인은 뭐였어?"
+  type: in_notes
+  expected_sources: ["decisions/002-native-redis-phase1.md", "development-log.md"]
+  must_include: ["BIOS"]
+
+- id: q03  # 그대로
+  question: "Phase 4 라우터 모델은 뭐야?"
+  type: in_notes
+  expected_sources: ["decisions/003-phase4-hermes-router.md", "model-comparison.md", "scope.md"]
+  must_include: ["Hermes"]
+
+- id: q04  # 다른 말
+  question: "라우터가 도구 호출을 안 돌려주면 어떻게 대처해?"
+  type: in_notes
+  expected_sources: ["decisions/003-phase4-hermes-router.md"]
+  must_include: ["Chroma"]
+
+- id: q05  # 그대로
+  question: "개발 PC의 CPU는 뭐야?"
+  type: in_notes
+  expected_sources: ["hardware-environment.md"]
+  must_include: ["5600X"]
+
+- id: q06  # 다른 말
+  question: "운영체제가 실제로 인식하는 메모리는 얼마야?"
+  type: in_notes
+  expected_sources: ["hardware-environment.md"]
+  must_include: ["31.9"]
+
+- id: q07  # 그대로
+  question: "qwen3:8b의 nvidia-smi peak VRAM은 얼마였어?"
+  type: in_notes
+  expected_sources: ["model-comparison.md", "hardware-environment.md", "decisions/002-native-redis-phase1.md"]
+  must_include: ["7559"]
+
+- id: q08  # 다른 말 ⚠ "전체 파라미터"/"total params"로 답하면 자동 판정 실패
+  question: "활성 파라미터가 작아도 MoE가 그래픽 메모리를 많이 먹는 이유는?"
+  type: in_notes
+  expected_sources: ["model-comparison.md", "study/00-MALA-study-guide.md"]
+  must_include: ["총 파라미터"]
+
+- id: q09  # 그대로
+  question: "LangGraph 최소 워크플로의 노드들은 뭐야?"
+  type: in_notes
+  expected_sources: ["architecture.md"]
+  must_include: ["retrieve", "validate"]
+
+- id: q10  # 다른 말
+  question: "에이전트끼리 서로 직접 부르지 않고 어떻게 메시지를 주고받아?"
+  type: in_notes
+  expected_sources: ["architecture.md"]
+  must_include: ["Redis"]
+
+- id: q11  # 그대로
+  question: "CrewAI + LangGraph 동시 운영을 비목표로 둔 이유는?"
+  type: in_notes
+  expected_sources: ["scope.md"]
+  must_include: ["이중화"]
+
+- id: q12  # 다른 말 ⚠ "5월 19일"로 답하면 자동 판정 실패
+  question: "MALA 프로젝트는 언제 시작했어?"
+  type: in_notes
+  expected_sources: ["scope.md"]
+  must_include: ["2026-05-19"]
+
+- id: q13  # 그대로
+  question: "demo.md의 스크린샷 파일명 규칙은?"
+  type: in_notes
+  expected_sources: ["demo.md"]
+  must_include: ["YYYY-MM-DD"]
+
+- id: q14  # 다른 말
+  question: "MALA 코드를 주로 짜는 도구는 뭐야?"
+  type: in_notes
+  expected_sources: ["workflow-roles.md"]
+  must_include: ["Cursor"]
+
+- id: q15  # 그대로
+  question: "3차 리뷰에서 구현 순서는 누구 안을 채택했어?"
+  type: in_notes
+  expected_sources: ["design-process.md"]
+  must_include: ["Claude"]
+
+# --- not_in_notes ---
+
+- id: q16  # ⚠ 문서에 항목만 있고 값 없음 — "TBD"라고만 답하면 자동 판정 실패
+  question: "qwen3:8b의 실측 생성 속도(tok/s)는 얼마야?"
+  type: not_in_notes
+
+- id: q17  # ⚠ hardware-environment에 _TBD_
+  question: "MALA 개발 PC의 저장장치 용량은 얼마야?"
+  type: not_in_notes
+
+- id: q18  # ⚠ 실측 _TBD_, 문헌 추정값만 있음 — 추정값을 실측처럼 말하면 오답
+  question: "Qwen3-14B Q4_K_M을 3080에서 실측한 VRAM은?"
+  type: not_in_notes
+
+- id: q19
+  question: "MALA Redis에 설정한 비밀번호(requirepass)는 뭐야?"
+  type: not_in_notes
+
+- id: q20
+  question: "MALA 평가에서 질문 하나의 평균 응답 시간은 몇 초야?"
+  type: not_in_notes
