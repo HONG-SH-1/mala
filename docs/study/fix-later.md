@@ -21,6 +21,8 @@
 | 14 | 서킷 브레이커 사실상 무동작 | `src/agents/hermes_router.py:119-124` | 죽은 안전장치 |
 | 15 | `_chat`의 JSON 파싱 실패 미처리 | `src/agents/hermes_router.py:80-83` · `:130-138` | 예외 전파 |
 | 16 | 라우터 모델 선택에 측정 근거 없음 | `docs/decisions/003-phase4-hermes-router.md` | 불필요한 모델 스왑 가능성 |
+| 17 | nomic-embed-text 필수 접두어 누락 | `src/retrieval/embedder.py:20-33` | 검색 품질 |
+| 18 | 평가 자동 판정이 '모른다'를 잘못 셈 | `src/eval/runner.py` (`DONT_KNOW_MARKERS`, `auto_verdict`) | 평가 숫자 왜곡 |
 
 ---
 
@@ -111,6 +113,8 @@ total_duration_s: 35.3
 | 누적 | 단발성 `/api/generate`라 턴 간 누적은 없음 (멀티턴 `/api/chat`으로 바꾸면 누적 시작) |
 
 > 같은 `/api/show` 결과에서 모델 기본 `temperature 0.6`, `top_k 20`, `top_p 0.95`도 확인됨 — **2번 항목 보강**: 답변 생성은 중립값이 아니라 0.6으로 돌고 있습니다.
+
+**평가 도구도 thinking을 못 셈 (2026-10-29 추가)** — thinking은 `response`가 아니라 별도 `thinking` 필드로 오고, 그 토큰은 `eval_count`(출력 토큰)에 포함됩니다. 그런데 `src/eval/runner.py`는 `response` 안의 `<think>` 태그만 찾습니다. 그래서 기준선 결과의 "thinking 블록이 섞인 답 0개"는 thinking이 없었다는 뜻이 아니고, "출력 토큰 평균 404"에는 thinking 토큰이 섞여 있습니다. 답 토큰과 thinking 토큰을 나눠 셀 수 없습니다.
 
 고칠 방향: `src/worker.py:call_ollama`의 페이로드에 `"think": False`를 추가(답변 품질을 보고 결정). 추론을 유지할 경우 `thinking` 필드를 로그나 `task_status`에 남겨 비용을 관측 가능하게 만들기.
 
@@ -379,13 +383,36 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 
 ---
 
+## 17. nomic-embed-text 필수 접두어 누락 — 질문과 문서를 같은 방식으로 임베딩
+
+`nomic-embed-text`는 입력 앞에 용도를 붙여야 합니다. 문서는 `search_document: `, 질문은 `search_query: `. 모델이 이 접두어를 보고 질문용·문서용 벡터를 다르게 만듭니다.
+
+`src/retrieval/embedder.py`는 받은 텍스트를 그대로 `/api/embed`에 보냅니다. `src/` 전체에 `search_query`, `search_document` 문자열이 없습니다. Chroma는 색인(`upsert_chunks`)과 검색(`search`)에 같은 `OllamaEmbeddingFunction`을 쓰므로, 지금 구조로는 질문인지 문서인지 구분할 수도 없습니다.
+
+기준선(2026-10-28)에서 출처 일치율이 낮았던 원인 후보 중 하나입니다. 이 항목만의 영향은 아직 재지 않았습니다.
+
+고칠 방향: 색인과 검색에 접두어를 따로 붙입니다. 환경변수 스위치로 켜고, 켤 때는 색인을 새로 만든 뒤 기준선과 같은 설정(`eval/env_docs.ps1`)으로 비교합니다. 기존 색인과 섞으면 안 됩니다.
+
+---
+
+## 18. 평가 자동 판정이 '모른다'를 잘못 셈
+
+`src/eval/runner.py`의 자동 판정에 빈틈이 두 개 있습니다.
+
+1. **"모릅니다"를 못 잡음** — `DONT_KNOW_MARKERS`에 `"모르"`가 있지만 "모릅니다"는 "모르"를 포함하지 않습니다(모**릅**니다). 재채점 테스트를 쓰다 발견했습니다. 기준선의 not_in_notes 답은 다른 표현을 써서 숫자에는 영향이 없었습니다.
+2. **in_notes 답이 '모른다'로 끝나도 키워드만 있으면 O** — 기준선 q03은 두 회차 모두 "모델 이름은 확인할 수 없다"로 끝났는데, 설명 중에 "Hermes"가 나와 자동 O였습니다. 사람 판정으로 X로 고쳤습니다.
+
+고칠 방향: 표시어에 "모릅"을 더하고, in_notes도 '모른다' 표시어가 있으면 X로 봅니다. 판정 규칙이 바뀌므로 고친 뒤 `eval_rescore`로 기준선도 새 규칙으로 다시 매기고, 그 숫자와 비교합니다.
+
+---
+
 ## 묶어서 보면
 
 **설정 누락 묶음 (1·2·5·6·7)** — "Ollama 호출에 `options`/`keep_alive`/`think`를 아무것도 안 넘긴다"는 한 원인. `src/worker.py:call_ollama` 페이로드에 `options`(`num_ctx`, `temperature`) + `keep_alive` + `think`를 추가하고 그 값을 `Settings`에 올리면 다섯 개가 함께 정리됨. 1·7은 곱해져 악화되는 조합.
 
 **예산 불일치 묶음 (3·4·14)** — 재시도·타임아웃·툴 스텝 상한이 서로 모르는 채 각각 정해짐. `GRAPH_MAX_RETRIES`는 이름과 실제 횟수가 어긋나고(실측 총 2회), `MAX_TOOL_STEPS`는 도달 불가, 워커·오케스트레이터 타임아웃은 역전. **세 예산을 한자리에서 계산해야 함.**
 
-**검색 품질 묶음 (9·10)** — 임베딩이 본 텍스트와 프롬프트에 들어가는 텍스트, 벡터 점수와 키워드 점수가 각각 어긋남.
+**검색 품질 묶음 (9·10·17)** — 임베딩이 본 텍스트와 프롬프트에 들어가는 텍스트, 벡터 점수와 키워드 점수가 각각 어긋남. 17은 임베딩 자체를 모델 사용법대로 만들지 않음.
 
 **조용한 실패 묶음 (8·11)** — 에러 없이 기능이 죽거나 데이터가 오염되고 **로그조차 남지 않음**. 테스트도 통과하므로 가장 늦게 발견됨. 8번은 한 줄 수정이지만 **우선순위 최상위**.
 
