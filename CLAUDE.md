@@ -17,11 +17,15 @@ D:\Redis\redis-cli.exe ping     # PONG
 ollama list                     # qwen3:8b, nomic-embed-text 있어야 함
 ```
 
-## 지금 단계: 0단계 기준선
+## 지금 단계: 1단계 검색 개선 실험
 
-- 기준선을 재기 전까지 `src/`의 기존 파일은 고치지 않는다. 측정 도구(`src/eval/`, `src/scripts/eval_run.py`)도 기준선을 잰 뒤에 고친다.
-- 측정 순서: `python -m src.scripts.eval_run --dry-run` → `python -m src.scripts.build_index` → `python -m src.scripts.eval_run --label baseline --repeat 2`
-- 결과는 `data/eval/`에 `.md`와 `.jsonl`로 남는다. 숫자를 해석하기 전에 `.md`를 그대로 보여준다.
+- 기준선: `eval/results/20261028-2205_baseline-docs_rescored.md` (평가 대상은 ADR-004).
+- 기본 동작은 그대로 둔다. 새 동작은 환경변수 스위치로만 켜고, 끄면 기준선과 같은 동작이어야 한다.
+- 기준선과 비교할 때는 `eval/env_docs.ps1` 설정을 그대로 쓴다. 명령마다 같은 줄에서 불러온다.
+  `. .\eval\env_docs.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --label <이름> --repeat 2`
+- 색인을 바꾸는 실험(임베딩 등)은 평가 전용 색인을 새로 만든 뒤 잰다.
+- 결과는 `data/eval/`에 `.md`와 `.jsonl`로 남는다. 숫자를 해석하기 전에 `.md`를 그대로 보여준다. 남길 결과는 `eval/results/`로 옮긴다.
+- 판정 규칙이나 질문 출처가 바뀌면 `src.scripts.eval_rescore`로 기준선도 다시 채점해 같은 잣대로 비교한다.
 
 ## 작업 규칙
 
@@ -32,7 +36,7 @@ ollama list                     # qwen3:8b, nomic-embed-text 있어야 함
 
 ## 데이터 규칙
 
-- `.env`, `data/`, `eval/questions.yaml`은 git에 올리지 않는다 (`.gitignore`에 있음).
+- `.env`, `data/`는 git에 올리지 않는다 (`.gitignore`에 있음). `eval/`의 질문과 결과는 공개 docs 기준이라 올린다.
 - 볼트 노트 원문은 외부 무료 API로 보내지 않는다.
 - API 키와 토큰은 코드, 로그, 커밋, 이 파일에 넣지 않는다.
 
