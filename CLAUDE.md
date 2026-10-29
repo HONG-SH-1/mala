@@ -19,7 +19,10 @@ ollama list                     # qwen3:8b, nomic-embed-text 있어야 함
 
 ## 지금 단계: 1단계 검색 개선 실험
 
-- 기준선: `eval/results/20261028-2205_baseline-docs_rescored.md` (평가 대상은 ADR-004).
+- 기준선 (질문 라벨 v2, 평가 대상은 ADR-004):
+  - 답변: `eval/results/20261028-2205_baseline-docs_rescored-v2.md`
+  - 검색: `eval/results/20261029-2116_ret-v2-k3-keyword.md` (`--retrieval-only`)
+- 질문 라벨은 1단계 실험 중에 바꾸지 않는다.
 - 기본 동작은 그대로 둔다. 새 동작은 환경변수 스위치로만 켜고, 끄면 기준선과 같은 동작이어야 한다.
 - 기준선과 비교할 때는 `eval/env_docs.ps1` 설정을 그대로 쓴다. 명령마다 같은 줄에서 불러온다.
   `. .\eval\env_docs.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --label <이름> --repeat 2`
