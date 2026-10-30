@@ -102,7 +102,7 @@ Python · **Native Redis** (Phase 1) · Docker Compose (optional) · LangGraph �
 | [`docs/decisions/`](docs/decisions/) | ADR |
 | [`docs/decisions/004-eval-docs-snapshot.md`](docs/decisions/004-eval-docs-snapshot.md) | ADR-004 평가 대상을 docs 고정 사본으로 |
 | [`docs/study/`](docs/study/) | 재학습 노트 (00, 02~06) |
-| [`docs/study/fix-later.md`](docs/study/fix-later.md) | 결함 목록 (현재 18건) |
+| [`docs/study/fix-later.md`](docs/study/fix-later.md) | 결함 목록 (현재 19건) |
 | [`troubleshooting/`](troubleshooting/) | 트러블슈팅 |
 | [`archive/`](archive/) | 초안·리뷰 로그 |
 

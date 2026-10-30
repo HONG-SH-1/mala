@@ -23,6 +23,7 @@
 | 16 | 라우터 모델 선택에 측정 근거 없음 | `docs/decisions/003-phase4-hermes-router.md` | 불필요한 모델 스왑 가능성 |
 | 17 | nomic-embed-text 필수 접두어 누락 | `src/retrieval/embedder.py:20-33` | 검색 품질 |
 | 18 | 평가 자동 판정이 '모른다'를 잘못 셈 | `src/eval/runner.py` (`DONT_KNOW_MARKERS`, `auto_verdict`) | 평가 숫자 왜곡 |
+| 19 | 평가 결과에 Ollama 버전·모델 ID 없음 | `src/eval/runner.py` (결과 머리) | 재현성 |
 
 ---
 
@@ -416,6 +417,14 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 2. **in_notes 답이 '모른다'로 끝나도 키워드만 있으면 O** — 기준선 q03은 두 회차 모두 "모델 이름은 확인할 수 없다"로 끝났는데, 설명 중에 "Hermes"가 나와 자동 O였습니다. 사람 판정으로 X로 고쳤습니다.
 
 고칠 방향: 표시어에 "모릅"을 더하고, in_notes도 '모른다' 표시어가 있으면 X로 봅니다. 판정 규칙이 바뀌므로 고친 뒤 `eval_rescore`로 기준선도 새 규칙으로 다시 매기고, 그 숫자와 비교합니다.
+
+---
+
+## 19. 평가 결과에 Ollama 버전과 모델 ID가 안 남음
+
+결과 `.md` 머리에는 커밋, 볼트, 컬렉션, TOP_K, rerank, 모델 이름이 있지만 Ollama 버전과 모델 ID(digest)는 없다. 2026-10-30에 Ollama가 다시 켜지면서 0.40.11 → 0.40.13으로 스스로 업데이트됐다. 이번에는 검색 결과가 같았지만, 다음에 숫자가 바뀌면 코드 때문인지 Ollama 때문인지 구분할 근거가 없다.
+
+고칠 방향: 평가를 시작할 때 `/api/version`과 `/api/tags`(모델 digest)를 읽어 결과 머리와 jsonl에 같이 남긴다.
 
 ---
 
