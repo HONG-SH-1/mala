@@ -11,6 +11,19 @@ from src.config import Settings
 
 logger = logging.getLogger(__name__)
 
+# nomic-embed-text는 입력 앞에 용도를 붙여야 질문용·문서용 벡터를 다르게 만든다 (fix-later 17번).
+EMBED_PREFIXES = {
+    "nomic": {"document": "search_document: ", "query": "search_query: "},
+}
+
+
+def add_prefix(texts: list[str], mode: str, kind: str) -> list[str]:
+    """mode가 off면 그대로, 아니면 kind(document|query)에 맞는 접두어를 붙인다."""
+    if mode == "off":
+        return list(texts)
+    prefix = EMBED_PREFIXES[mode][kind]
+    return [prefix + t for t in texts]
+
 
 class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(self, settings: Settings) -> None:

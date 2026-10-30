@@ -37,15 +37,23 @@ class Settings:
     use_hermes_router: bool
     # keyword: 키워드 점수로 다시 정렬 (기본, 지금 동작) | off: 벡터 거리순 그대로
     rag_rerank: str = "keyword"
+    # off: 임베딩 입력에 아무것도 안 붙임 (기본, 지금 동작) | nomic: search_document:/search_query: 접두어
+    embed_prefix: str = "off"
 
 
 RAG_RERANK_MODES = ("keyword", "off")
+EMBED_PREFIX_MODES = ("off", "nomic")
 
 
 def get_settings() -> Settings:
     rag_rerank = os.getenv("RAG_RERANK", "keyword").strip().lower() or "keyword"
     if rag_rerank not in RAG_RERANK_MODES:
         raise ValueError(f"RAG_RERANK은 {RAG_RERANK_MODES} 중 하나여야 합니다: {rag_rerank!r}")
+    embed_prefix = os.getenv("EMBED_PREFIX", "off").strip().lower() or "off"
+    if embed_prefix not in EMBED_PREFIX_MODES:
+        raise ValueError(
+            f"EMBED_PREFIX는 {EMBED_PREFIX_MODES} 중 하나여야 합니다: {embed_prefix!r}"
+        )
     return Settings(
         redis_host=os.getenv("REDIS_HOST", "localhost"),
         redis_port=int(os.getenv("REDIS_PORT", "6379")),
@@ -82,4 +90,5 @@ def get_settings() -> Settings:
         use_hermes_router=os.getenv("USE_HERMES_ROUTER", "0").lower()
         in ("1", "true", "yes"),
         rag_rerank=rag_rerank,
+        embed_prefix=embed_prefix,
     )

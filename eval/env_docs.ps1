@@ -19,3 +19,5 @@ $env:OLLAMA_EMBED_MODEL  = "nomic-embed-text"
 $env:GRAPH_MAX_RETRIES   = "2"
 $env:RAG_TOP_K           = "3"
 $env:RAG_RERANK          = "keyword"
+# $env: 값은 창을 닫을 때까지 남는다. 접두어 실험 뒤 같은 창에서도 기준선으로 돌아오게 한다.
+$env:EMBED_PREFIX        = "off"

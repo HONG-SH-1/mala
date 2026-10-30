@@ -31,6 +31,7 @@ from src.eval.runner import (
     render_retrieval_markdown,
     run_eval,
     run_meta,
+    run_env,
     run_retrieval_eval,
     summarize,
     summarize_retrieval,
@@ -125,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = _out_dir(args, settings)
     stem = f"{datetime.now():%Y%m%d-%H%M}_{args.label}"
-    write_jsonl(out_dir / f"{stem}.jsonl", records)
+    write_jsonl(out_dir / f"{stem}.jsonl", [{**r, "run_env": run_env(meta)} for r in records])
     report = render_markdown(meta, summary, records)
     (out_dir / f"{stem}.md").write_text(report, encoding="utf-8")
 
@@ -160,7 +161,7 @@ def _run_retrieval_only(args, questions, settings, meta) -> int:
     )
     out_dir = _out_dir(args, settings)
     stem = f"{datetime.now():%Y%m%d-%H%M}_{args.label}"
-    write_jsonl(out_dir / f"{stem}.jsonl", records)
+    write_jsonl(out_dir / f"{stem}.jsonl", [{**r, "run_env": run_env(meta)} for r in records])
     report = render_retrieval_markdown(meta, summarize_retrieval(records), records)
     (out_dir / f"{stem}.md").write_text(report, encoding="utf-8")
 

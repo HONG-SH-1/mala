@@ -144,3 +144,33 @@ def test_main_suffix_keeps_earlier_rescore(tmp_path):
     assert old.read_text(encoding="utf-8") == "v1"
     md = (tmp_path / "run_rescored-v2.md").read_text(encoding="utf-8")
     assert "sha256 " in md and "sha256 -" not in md
+
+
+def test_main_reads_jsonl_with_run_env(tmp_path):
+    """fix-later 19번 이후 jsonl에는 run_env 칸이 붙는다. 재채점은 그대로 읽고 칸을 남긴다."""
+    env = {
+        "ollama": {"version": "0.40.13", "answer_digest": "sha256:aa", "embed_digest": "알 수 없음"},
+        "embed_prefix": "off",
+    }
+    results = tmp_path / "run.jsonl"
+    results.write_text(
+        "".join(json.dumps({**r, "run_env": env}, ensure_ascii=False) + "\n" for r in RECORDS),
+        encoding="utf-8",
+    )
+    questions = tmp_path / "q.yaml"
+    questions.write_text(
+        "- {id: q1, question: '?', type: in_notes, expected_sources: [a.md, b.md], "
+        "must_include: [Ollama]}\n"
+        "- {id: q2, question: '?', type: not_in_notes}\n",
+        encoding="utf-8",
+    )
+
+    rc = eval_rescore.main([str(results), "--questions", str(questions)])
+
+    assert rc == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "run_rescored.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [r["correct"] for r in rows] == [r["correct"] for r in rescore(RECORDS, QUESTIONS)]
+    assert all(r["run_env"] == env for r in rows)

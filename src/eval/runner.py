@@ -360,6 +360,41 @@ def summarize(records: list[dict]) -> dict:
     return summary
 
 
+UNKNOWN = "알 수 없음"
+
+
+def _tag_name(model: str) -> str:
+    """Ollama 목록은 태그 없는 이름을 ':latest'로 적는다 (nomic-embed-text → nomic-embed-text:latest)."""
+    return model if ":" in model else f"{model}:latest"
+
+
+def ollama_info(settings: Settings, *, transport=None, timeout: float = 5.0) -> dict:
+    """Ollama 버전과 답변·임베딩 모델 digest. 못 읽은 칸은 '알 수 없음'으로 두고 평가는 계속한다.
+
+    Ollama는 다시 켤 때 스스로 업데이트할 수 있어서, 숫자가 바뀌었을 때 원인을 가리려면 필요하다
+    (fix-later 19번).
+    """
+    import httpx
+
+    info = {"version": UNKNOWN, "answer_digest": UNKNOWN, "embed_digest": UNKNOWN}
+    base = settings.ollama_base_url.rstrip("/")
+    try:
+        with httpx.Client(timeout=timeout, transport=transport) as client:
+            info["version"] = client.get(f"{base}/api/version").raise_for_status().json()["version"]
+            models = client.get(f"{base}/api/tags").raise_for_status().json().get("models") or []
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return info
+    digests = {m.get("name") or m.get("model"): m.get("digest") for m in models if isinstance(m, dict)}
+    for key, model in (("answer_digest", settings.ollama_model), ("embed_digest", settings.ollama_embed_model)):
+        info[key] = digests.get(_tag_name(model)) or UNKNOWN
+    return info
+
+
+def run_env(meta: dict) -> dict:
+    """jsonl 각 줄에 붙이는 실행 환경. 재채점은 모르는 칸을 그대로 넘긴다."""
+    return {"ollama": meta.get("ollama"), "embed_prefix": meta.get("embed_prefix")}
+
+
 def run_meta(settings: Settings, *, label: str, questions_path: str) -> dict:
     root = settings.project_root
     return {
@@ -371,6 +406,8 @@ def run_meta(settings: Settings, *, label: str, questions_path: str) -> dict:
         "embed_model": settings.ollama_embed_model,
         "rag_top_k": settings.rag_top_k,
         "rag_rerank": settings.rag_rerank,
+        "embed_prefix": settings.embed_prefix,
+        "ollama": ollama_info(settings),
         "vault": settings.obsidian_vault_path,  # 설정값 그대로 (절대 경로로 풀지 않음)
         "collection": settings.chroma_collection,
         "graph_max_retries": settings.graph_max_retries,
@@ -388,6 +425,18 @@ def _git(root: Path, *args: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _env_line(meta: dict) -> str:
+    o = meta.get("ollama") or {}
+
+    def _d(v):  # digest는 앞 12자리만 (전체는 jsonl에)
+        return v if not v or v == UNKNOWN else v.split(":")[-1][:12]
+
+    return (
+        f"- Ollama: {o.get('version', UNKNOWN)}, digest: 답변 {_d(o.get('answer_digest', UNKNOWN))}, "
+        f"임베딩 {_d(o.get('embed_digest', UNKNOWN))}, 임베딩 접두어: {meta.get('embed_prefix', '-')}"
+    )
 
 
 def _pct(v: float | None) -> str:
@@ -408,6 +457,7 @@ def render_markdown(meta: dict, summary: dict, records: list[dict]) -> str:
         f"- 답변 모델: {meta['answer_model']}, 임베딩: {meta['embed_model']}, "
         f"TOP_K: {meta['rag_top_k']}, rerank: {meta.get('rag_rerank', '-')}",
         f"- 볼트: {meta.get('vault', '-')}, 컬렉션: {meta.get('collection', '-')}",
+        _env_line(meta),
         f"- 질문 파일: {meta.get('questions_file', '-')} (sha256 {meta.get('questions_sha8') or '-'})",
         f"- 질문 {summary['questions']}개 x {summary['repeats']}회",
         "",
@@ -595,6 +645,7 @@ def render_retrieval_markdown(meta: dict, summary: dict, records: list[dict]) ->
         + (" (src에 커밋 안 된 변경 있음)" if meta["git_dirty_src"] else ""),
         f"- 볼트: {meta['vault']}, 컬렉션: {meta['collection']}",
         f"- TOP_K: {meta['rag_top_k']}, rerank: {meta['rag_rerank']}, 임베딩: {meta['embed_model']}",
+        _env_line(meta),
         f"- 질문: {meta['questions_file']} (sha256 {meta.get('questions_sha8') or '-'})의 "
         f"in_notes {summary['questions']}개 x 1회 (답변 모델 호출 없음)",
         "",

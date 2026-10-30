@@ -206,3 +206,63 @@ def test_retry_is_counted_and_summary_shows_it(offline_graph):
         records,
     )
     assert "| q03 | in_notes | O | O |" in md
+
+
+# --- Ollama 버전·digest (fix-later 19번) ---------------------------------------
+
+import httpx  # noqa: E402
+
+from src.eval.runner import UNKNOWN, ollama_info, render_retrieval_markdown  # noqa: E402
+
+
+def _ollama(handler):
+    from dataclasses import replace
+
+    from src.config import get_settings
+
+    s = replace(get_settings(), ollama_model="qwen3:8b", ollama_embed_model="nomic-embed-text")
+    return ollama_info(s, transport=httpx.MockTransport(handler))
+
+
+def test_ollama_info_reads_version_and_digests():
+    def handler(req):
+        if req.url.path == "/api/version":
+            return httpx.Response(200, json={"version": "0.40.13"})
+        return httpx.Response(
+            200,
+            json={"models": [
+                {"name": "qwen3:8b", "digest": "aaa111"},
+                {"name": "nomic-embed-text:latest", "digest": "bbb222"},  # 태그 없는 설정값과 맞춘다
+            ]},
+        )
+
+    assert _ollama(handler) == {"version": "0.40.13", "answer_digest": "aaa111", "embed_digest": "bbb222"}
+
+
+def test_ollama_info_missing_model_is_unknown():
+    def handler(req):
+        if req.url.path == "/api/version":
+            return httpx.Response(200, json={"version": "0.40.13"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b", "digest": "aaa111"}]})
+
+    assert _ollama(handler)["embed_digest"] == UNKNOWN
+
+
+def test_ollama_info_connection_failure_is_unknown():
+    def handler(req):
+        raise httpx.ConnectError("refused")
+
+    assert _ollama(handler) == {"version": UNKNOWN, "answer_digest": UNKNOWN, "embed_digest": UNKNOWN}
+
+
+def test_retrieval_header_shows_ollama_and_prefix():
+    meta = {
+        "label": "t", "started_at": "now", "git_commit": "abc", "git_dirty_src": False,
+        "vault": "v", "collection": "c", "rag_top_k": 3, "rag_rerank": "keyword",
+        "embed_model": "nomic-embed-text", "questions_file": "q.yaml", "questions_sha8": "x",
+        "embed_prefix": "nomic",
+        "ollama": {"version": "0.40.13", "answer_digest": UNKNOWN, "embed_digest": "sha256:0123456789abcdef"},
+    }
+    summary = {k: (None, 0, 0) for k in ("evidence_expected", "evidence_any", "source_hit", "short_chunks")}
+    md = render_retrieval_markdown(meta, {**summary, "questions": 0, "errors": 0}, [])
+    assert "- Ollama: 0.40.13, digest: 답변 알 수 없음, 임베딩 0123456789ab, 임베딩 접두어: nomic" in md
