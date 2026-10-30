@@ -4,8 +4,11 @@
 q01: false
 q03: false  # 결론이 "모른다"
 q05: false
+q07: true  # 2026-10-30 공개 판정 (in_notes 자동 O도 사람이 본다)
 q08: true
+q09: true  # 2026-10-30 공개 판정
 q12: false
+q13: true  # 2026-10-30 공개 판정
 q15: false
 q16: true
 q17: true

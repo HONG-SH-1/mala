@@ -1,6 +1,6 @@
 # 재채점 결과: 20261028-2205_baseline-docs.jsonl
 
-- 재채점 시각: 2026-10-29T21:16:37
+- 재채점 시각: 2026-10-30T21:56:12
 - 질문 파일: eval/questions.yaml (sha256 68e6aebc)
 - 수동 판정: eval/results/20261028-2205_baseline-docs.manual.yaml
 - 질문 20개 x 2회
@@ -29,13 +29,13 @@
 | q04 | in_notes | O | X/X | -/- | X/X |
 | q05 | in_notes | O | X/X | X/X | X/X |
 | q06 | in_notes | X | X/X | -/- | X/X |
-| q07 | in_notes | O | O/O | -/- | O/O |
+| q07 | in_notes | O | O/O | O/O | O/O |
 | q08 | in_notes | O | O/O | O/O | O/O |
-| q09 | in_notes | O | O/O | -/- | O/O |
+| q09 | in_notes | O | O/O | O/O | O/O |
 | q10 | in_notes | O | X/X | -/- | X/X |
 | q11 | in_notes | X | X/X | -/- | X/X |
 | q12 | in_notes | O | X/X | X/X | X/X |
-| q13 | in_notes | O | O/O | -/- | O/O |
+| q13 | in_notes | O | O/O | O/O | O/O |
 | q14 | in_notes | X | X/X | -/- | X/X |
 | q15 | in_notes | O | X/X | X/X | X/X |
 | q16 | not_in_notes | - | O/O | O/O | O/O |

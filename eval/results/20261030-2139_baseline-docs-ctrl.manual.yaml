@@ -1,0 +1,16 @@
+# 20261030-2139_baseline-docs-ctrl 수동 판정 (2026-10-30, 가림 판정)
+# 값 하나면 전 회차, 목록이면 회차별 (1회차, 2회차)
+# 규칙: in_notes는 키워드가 있어도 결론이 "모른다/확인할 수 없다"거나 틀린 답이면 X. not_in_notes는 없는 값을 실측처럼 말하면 X
+# 판정 출처: 주석 없음·B 번호 = 가림 판정지 1, '가림 판정 2' = C 판정지(in_notes 자동 O 전수), '공개 판정' = 가리지 않음
+q02: false  # 가림 판정 2 (C19, C04); C19: in_notes인데 I do not know; C04: in_notes인데 I do not know
+q03: [false, false]  # 공개 판정. 1회차: 결론이 "명시되지 않음". 2회차: "키워드 폴백 시스템"이라는 틀린 답
+q05: false  # 가림 판정 2 (C08, C14); C08: in_notes인데 I do not know; C14: in_notes인데 I do not know
+q07: true  # 가림 판정 2 (C02, C17)
+q08: true  # 가림 판정 2 (C11, C15)
+q09: true  # 가림 판정 2 (C22, C07)
+q13: true  # 가림 판정 2 (C09, C01); C01: 중국어 글자 섞임, 내용은 정확
+q16: true
+q17: true
+q18: true  # B04: 추정이라고 밝히고 실측 없음(TBD)이라고 함
+q19: true
+q20: true
