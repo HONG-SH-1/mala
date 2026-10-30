@@ -81,6 +81,30 @@ in_notes 질문만 1회 돕니다 (기준선에서 1·2회차 검색 결과가 �
 판정은 프롬프트에 실제로 들어가는 글(`format_context`, 본문 1200자까지)로 합니다.
 `RAG_RERANK`는 `keyword`(기본, 지금 동작)와 `off`(벡터 거리순 그대로)입니다.
 
+## 임베딩 접두어 실험 (`env_docs_prefix.ps1`)
+
+`EMBED_PREFIX=nomic`이면 색인할 때 `search_document: `, 검색할 때 `search_query: `를 붙입니다 (기본 `off`는 지금 동작).
+벡터가 달라지므로 색인을 따로 만듭니다. `eval/env_docs_prefix.ps1`은 `env_docs.ps1`을 불러온 뒤 바뀌는 값만 덮어씁니다.
+
+| 값 | 기준선 (`env_docs.ps1`) | 접두어 (`env_docs_prefix.ps1`) |
+| --- | --- | --- |
+| `CHROMA_COLLECTION` | `mala_eval_docs` | `mala_eval_docs_prefix` |
+| `INDEX_MANIFEST_PATH` | `data/eval_manifest_docs.json` | `data/eval_manifest_docs_prefix.json` |
+| `INDEX_FAILURES_PATH` | `data/eval_index_failures.jsonl` | `data/eval_index_failures_prefix.jsonl` |
+| `EMBED_PREFIX` | `off` | `nomic` |
+
+매니페스트를 같이 쓰면 증분 색인이 "바뀐 것 없음"으로 보고 건너뜁니다. 그래서 매니페스트도 따로 둡니다.
+접두어 방식이 다른 컬렉션을 열면 오류가 납니다. 예를 들어 `env_docs.ps1`로 `mala_eval_docs_prefix`를 열면 막힙니다.
+
+```powershell
+. .\eval\env_docs_prefix.ps1; python -m src.scripts.build_index
+. .\eval\env_docs_prefix.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --retrieval-only --label ret-v2-k3-keyword-prefix
+. .\eval\env_docs_prefix.ps1; $env:RAG_RERANK = "off"; python -m src.scripts.eval_run --questions eval/questions.yaml --retrieval-only --label ret-v2-k3-off-prefix
+. .\eval\env_docs_prefix.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --label <이름> --repeat 2
+```
+
+결과 머리의 `임베딩 접두어:` 칸으로 어느 쪽으로 쟀는지 확인합니다.
+
 ## 재는 것
 
 | 지표 | 어떻게 |
@@ -127,3 +151,4 @@ python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.json
 - `20261028-2205_baseline-docs.*` — 0단계 기준선 (원본, 사람 판정, 재채점 v1 `_rescored`, v2 `_rescored-v2`)
 - `20261029-2109_ret-*` — 검색만 재기 4개 조합, 라벨 v1
 - `20261029-2116_ret-v2-*` — 검색만 재기 4개 조합, 라벨 v2 (`ret-v2-k3-keyword`가 검색 기준선)
+- `20261030-2115_ret-v2-k3-*-prefix` — 임베딩 접두어(nomic), TOP_K 3 keyword·off, 라벨 v2

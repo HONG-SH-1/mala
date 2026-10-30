@@ -21,9 +21,9 @@
 | 14 | 서킷 브레이커 사실상 무동작 | `src/agents/hermes_router.py:119-124` | 죽은 안전장치 |
 | 15 | `_chat`의 JSON 파싱 실패 미처리 | `src/agents/hermes_router.py:80-83` · `:130-138` | 예외 전파 |
 | 16 | 라우터 모델 선택에 측정 근거 없음 | `docs/decisions/003-phase4-hermes-router.md` | 불필요한 모델 스왑 가능성 |
-| 17 | nomic-embed-text 필수 접두어 누락 | `src/retrieval/embedder.py:20-33` | 검색 품질 |
+| 17 | nomic-embed-text 필수 접두어 누락 — **측정함 (2026-10-30), 기본값은 아직 off** | `src/retrieval/embedder.py` · `chroma_store.py` | 검색 품질 |
 | 18 | 평가 자동 판정이 '모른다'를 잘못 셈 | `src/eval/runner.py` (`DONT_KNOW_MARKERS`, `auto_verdict`) | 평가 숫자 왜곡 |
-| 19 | 평가 결과에 Ollama 버전·모델 ID 없음 | `src/eval/runner.py` (결과 머리) | 재현성 |
+| 19 | ~~평가 결과에 Ollama 버전·모델 ID 없음~~ **수정됨 (2026-10-30)** | `src/eval/runner.py` (결과 머리) | 재현성 |
 
 ---
 
@@ -407,6 +407,26 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 
 고칠 방향: 색인과 검색에 접두어를 따로 붙입니다. 환경변수 스위치로 켜고, 켤 때는 색인을 새로 만든 뒤 기준선과 같은 설정(`eval/env_docs.ps1`)으로 비교합니다. 기존 색인과 섞으면 안 됩니다.
 
+**측정 결과 (2026-10-30) — 상태: 측정함, 기본값은 아직 off.**
+
+스위치 `EMBED_PREFIX=off|nomic`(기본 off)을 넣었습니다. Chroma 0.6은 임베딩 함수에 문서/질문 구분을 넘기지 않아서, nomic일 때는 접두어 붙인 글로 벡터를 직접 만들어 `embeddings=`·`query_embeddings=`로 넘깁니다. 저장하는 원문에는 접두어가 없습니다. 접두어 방식이 다른 컬렉션을 열면 오류가 납니다(컬렉션 메타데이터 `embed_prefix`).
+
+평가 전용 색인 `mala_eval_docs_prefix`(`eval/env_docs_prefix.ps1`)를 새로 만들어 `--retrieval-only`로 쟀습니다. 기준선 색인과 청크 수(293), chunk id, 저장 원문이 모두 같음을 확인했습니다.
+
+| 지표 | k3 keyword: 기준선 → 접두어 | k3 off: 기준선 → 접두어 |
+|---|---|---|
+| 근거 청크 (기대 출처, 주 지표) | 27% (4/15) → 53% (8/15) | 7% (1/15) → 20% (3/15) |
+| 근거 청크 (아무 청크) | 33% (5/15) → 60% (9/15) | 7% (1/15) → 27% (4/15) |
+| 출처 일치 (파일) | 80% (12/15) → 87% (13/15) | 73% (11/15) → 73% (11/15) |
+| 200자 미만 청크 | 76% (34/45) → 42% (19/45) | 84% (38/45) → 53% (24/45) |
+
+바뀐 문항 (출처, 근거 기대 출처, 근거 아무 청크 / 숫자는 순위, X는 없음):
+
+- k3 keyword: q02 (O,X,X)→(O,3,3), q03 (O,X,2)→(O,2,2), q05 (O,X,X)→(O,1,1), q09 (O,3,3)→(O,2,2), q10 (O,X,X)→(O,X,3), q14 (X,X,X)→(O,X,X), q15 (O,X,X)→(O,3,3). 나빠진 문항 없음.
+- k3 off: q02 (O,X,X)→(O,3,3), q09 (O,X,X)→(O,3,3), q10 (O,X,X)→(X,X,1), q12 (X,X,X)→(O,X,X), q13 (O,X,X)→(X,X,X), q14 (X,X,X)→(O,X,X).
+
+결과: `eval/results/20261030-2115_ret-v2-k3-keyword-prefix.md`, `..._ret-v2-k3-off-prefix.md`. 접두어를 붙여도 rerank keyword가 off보다 낫습니다(9번과 같은 결론). 답변 정답률은 아직 재지 않았습니다. 기본값 변경은 답변 평가를 본 뒤 정합니다.
+
 ---
 
 ## 18. 평가 자동 판정이 '모른다'를 잘못 셈
@@ -425,6 +445,8 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 결과 `.md` 머리에는 커밋, 볼트, 컬렉션, TOP_K, rerank, 모델 이름이 있지만 Ollama 버전과 모델 ID(digest)는 없다. 2026-10-30에 Ollama가 다시 켜지면서 0.40.11 → 0.40.13으로 스스로 업데이트됐다. 이번에는 검색 결과가 같았지만, 다음에 숫자가 바뀌면 코드 때문인지 Ollama 때문인지 구분할 근거가 없다.
 
 고칠 방향: 평가를 시작할 때 `/api/version`과 `/api/tags`(모델 digest)를 읽어 결과 머리와 jsonl에 같이 남긴다.
+
+**수정 결과 (2026-10-30):** `src/eval/runner.py`의 `ollama_info()`가 평가 시작 때 버전과 답변·임베딩 모델 digest를 읽는다. 결과 `.md` 머리에 `- Ollama: <버전>, digest: 답변 <앞 12자리>, 임베딩 <앞 12자리>, 임베딩 접두어: <off|nomic>` 줄이 생기고, jsonl 각 줄의 `run_env` 칸에 전체 digest가 남는다. 연결이 안 되거나 모델을 못 찾으면 그 칸만 "알 수 없음"이고 평가는 계속한다. `eval_rescore`는 `run_env`가 붙은 jsonl을 그대로 읽는다(테스트 있음). 실제 실행에서 digest가 `ollama list`의 ID와 같음을 확인했다.
 
 ---
 
