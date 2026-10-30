@@ -152,3 +152,6 @@ python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.json
 - `20261029-2109_ret-*` — 검색만 재기 4개 조합, 라벨 v1
 - `20261029-2116_ret-v2-*` — 검색만 재기 4개 조합, 라벨 v2 (`ret-v2-k3-keyword`가 검색 기준선)
 - `20261030-2115_ret-v2-k3-*-prefix` — 임베딩 접두어(nomic), TOP_K 3 keyword·off, 라벨 v2
+- `20261030-2139_baseline-docs-ctrl.*` — 답변 평가 대조군 (접두어 off, Ollama 0.40.13). 원본, 사람 판정, 재채점 v2
+- `20261030-2134_baseline-docs-prefix.*` — 답변 평가 접두어 (nomic, Ollama 0.40.13). 원본, 사람 판정, 재채점 v2
+- 2026-10-30부터 사람 판정 규칙: not_in_notes는 전부, in_notes는 자동 O도 사람이 봅니다. 기준선 `manual.yaml`에도 같은 규칙으로 q07·q09·q13을 더했습니다 (숫자는 그대로).
