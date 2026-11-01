@@ -19,13 +19,14 @@ ollama list                     # qwen3:8b, nomic-embed-text 있어야 함
 
 ## 지금 단계: 1단계 검색 개선 실험
 
-- 기준선 (질문 라벨 v2, 평가 대상은 ADR-004):
-  - 답변: `eval/results/20261028-2205_baseline-docs_rescored-v2.md`
-  - 검색: `eval/results/20261029-2116_ret-v2-k3-keyword.md` (`--retrieval-only`)
+- 비교 기준 (질문 라벨 v2, 평가 대상은 ADR-004, 임베딩 접두어 nomic은 ADR-005):
+  - 답변: `eval/results/20261030-2134_baseline-docs-prefix_rescored-v2.md`
+  - 검색: `eval/results/20261030-2115_ret-v2-k3-keyword-prefix.md` (`--retrieval-only`)
 - 질문 라벨은 1단계 실험 중에 바꾸지 않는다.
-- 기본 동작은 그대로 둔다. 새 동작은 환경변수 스위치로만 켜고, 끄면 기준선과 같은 동작이어야 한다.
-- 기준선과 비교할 때는 `eval/env_docs.ps1` 설정을 그대로 쓴다. 명령마다 같은 줄에서 불러온다.
-  `. .\eval\env_docs.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --label <이름> --repeat 2`
+- 기본 동작은 그대로 둔다. 새 동작은 환경변수 스위치로만 켜고, 끄면 이전 동작과 같아야 한다.
+- 비교 기준과 비교할 때는 `eval/env_docs_prefix.ps1` 설정을 그대로 쓴다. 명령마다 같은 줄에서 불러온다.
+  `. .\eval\env_docs_prefix.ps1; python -m src.scripts.eval_run --questions eval/questions.yaml --label <이름> --repeat 2`
+- `eval/env_docs.ps1`은 10-28 기준선 재현용(off)이다. 접두어 없는 결과(`20261028-2205_baseline-docs_rescored-v2.md`, `20261029-2116_ret-v2-k3-keyword.md`)를 다시 잴 때만 쓴다.
 - 색인을 바꾸는 실험(임베딩 등)은 평가 전용 색인을 새로 만든 뒤 잰다.
 - 결과는 `data/eval/`에 `.md`와 `.jsonl`로 남는다. 숫자를 해석하기 전에 `.md`를 그대로 보여준다. 남길 결과는 `eval/results/`로 옮긴다.
 - 판정 규칙이나 질문 출처가 바뀌면 `src.scripts.eval_rescore`로 기준선도 다시 채점해 같은 잣대로 비교한다.

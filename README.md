@@ -69,6 +69,8 @@ Phase 0  VRAM·RAM 실측 → Phase 1  Docker·Redis·큐 E2E
 | 출처 일치율 (파일 단위) | 80% (12/15) |
 | 가져온 청크 중 200자 미만 | 76% (34/45) |
 
+**임베딩 접두어 (기본값, [ADR-005](docs/decisions/005-embed-prefix-default.md))** — 답 근거 청크 4/15 → 8/15, in_notes 정답 4/15 → 7/15 (같은 날 대조군 대비), 나빠진 문항 0. 대가는 입력 토큰 511 → 647, 응답 시간 중앙값 7.3 → 8.2초. 결과: [검색](eval/results/20261030-2115_ret-v2-k3-keyword-prefix.md), [답변](eval/results/20261030-2134_baseline-docs-prefix_rescored-v2.md).
+
 ---
 
 ## 기술 스택 (1차)
@@ -101,6 +103,7 @@ Python · **Native Redis** (Phase 1) · Docker Compose (optional) · LangGraph �
 | [`docs/workflow-roles.md`](docs/workflow-roles.md) | 도구별 역할 정리 |
 | [`docs/decisions/`](docs/decisions/) | ADR |
 | [`docs/decisions/004-eval-docs-snapshot.md`](docs/decisions/004-eval-docs-snapshot.md) | ADR-004 평가 대상을 docs 고정 사본으로 |
+| [`docs/decisions/005-embed-prefix-default.md`](docs/decisions/005-embed-prefix-default.md) | ADR-005 임베딩 접두어 기본값을 nomic으로 |
 | [`docs/study/`](docs/study/) | 재학습 노트 (00, 02~06) |
 | [`docs/study/fix-later.md`](docs/study/fix-later.md) | 결함 목록 (현재 19건) |
 | [`troubleshooting/`](troubleshooting/) | 트러블슈팅 |

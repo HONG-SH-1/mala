@@ -83,10 +83,10 @@ in_notes 질문만 1회 돕니다 (기준선에서 1·2회차 검색 결과가 �
 
 ## 임베딩 접두어 실험 (`env_docs_prefix.ps1`)
 
-`EMBED_PREFIX=nomic`이면 색인할 때 `search_document: `, 검색할 때 `search_query: `를 붙입니다 (기본 `off`는 지금 동작).
+`EMBED_PREFIX=nomic`이면 색인할 때 `search_document: `, 검색할 때 `search_query: `를 붙입니다. 2026-11-01부터 기본값은 `nomic`입니다 ([ADR-005](../docs/decisions/005-embed-prefix-default.md)). `off`는 아무것도 안 붙이는 10-28 기준선 동작입니다.
 벡터가 달라지므로 색인을 따로 만듭니다. `eval/env_docs_prefix.ps1`은 `env_docs.ps1`을 불러온 뒤 바뀌는 값만 덮어씁니다.
 
-| 값 | 기준선 (`env_docs.ps1`) | 접두어 (`env_docs_prefix.ps1`) |
+| 값 | 10-28 기준선 재현 (`env_docs.ps1`, off) | 접두어, 1단계 비교 기준 (`env_docs_prefix.ps1`) |
 | --- | --- | --- |
 | `CHROMA_COLLECTION` | `mala_eval_docs` | `mala_eval_docs_prefix` |
 | `INDEX_MANIFEST_PATH` | `data/eval_manifest_docs.json` | `data/eval_manifest_docs_prefix.json` |

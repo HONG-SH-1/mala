@@ -446,6 +446,15 @@ v1과 v2는 가져온 청크가 같고 라벨만 다르다. 오른 몫은 검색
 
 ---
 
+## 2026-11-01 — 임베딩 접두어 기본값 nomic (ADR-005)
+
+- `EMBED_PREFIX` 기본값을 off에서 nomic으로 바꿨다 ([ADR-005](decisions/005-embed-prefix-default.md)). 근거는 10-30 검색·답변 평가다.
+- 1단계 비교 기준을 접두어 결과로 바꿨다. 검색은 `20261030-2115_ret-v2-k3-keyword-prefix.md`, 답변은 `20261030-2134_baseline-docs-prefix_rescored-v2.md`, 설정은 `eval/env_docs_prefix.ps1`이다.
+- `eval/env_docs.ps1`은 10-28 기준선 재현용으로 `EMBED_PREFIX=off`를 그대로 둔다.
+- 기존 실제 볼트 색인 `mala_vault`는 접두어 없이 만들어서, nomic으로 열면 섞임 방지 오류가 난다. 새 컬렉션 `mala_vault_prefix`(매니페스트 `data/index_manifest_prefix.json`, 실패 기록 `data/index_failures_prefix.jsonl`)로 다시 색인한다. `mala_vault`와 `data/index_manifest.json`은 되돌릴 때를 위해 그대로 둔다.
+
+---
+
 ## 5일 한눈에
 
 | 날짜 | 한 줄 |

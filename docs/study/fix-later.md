@@ -21,7 +21,7 @@
 | 14 | 서킷 브레이커 사실상 무동작 | `src/agents/hermes_router.py:119-124` | 죽은 안전장치 |
 | 15 | `_chat`의 JSON 파싱 실패 미처리 | `src/agents/hermes_router.py:80-83` · `:130-138` | 예외 전파 |
 | 16 | 라우터 모델 선택에 측정 근거 없음 | `docs/decisions/003-phase4-hermes-router.md` | 불필요한 모델 스왑 가능성 |
-| 17 | nomic-embed-text 필수 접두어 누락 — **측정함 (2026-10-30), 기본값은 아직 off** | `src/retrieval/embedder.py` · `chroma_store.py` | 검색 품질 |
+| 17 | nomic-embed-text 필수 접두어 누락 — **기본값 nomic (ADR-005)** | `src/retrieval/embedder.py` · `chroma_store.py` | 검색 품질 |
 | 18 | 평가 자동 판정이 '모른다'를 잘못 셈 | `src/eval/runner.py` (`DONT_KNOW_MARKERS`, `auto_verdict`) | 평가 숫자 왜곡 |
 | 19 | ~~평가 결과에 Ollama 버전·모델 ID 없음~~ **수정됨 (2026-10-30)** | `src/eval/runner.py` (결과 머리) | 재현성 |
 
@@ -407,7 +407,7 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 
 고칠 방향: 색인과 검색에 접두어를 따로 붙입니다. 환경변수 스위치로 켜고, 켤 때는 색인을 새로 만든 뒤 기준선과 같은 설정(`eval/env_docs.ps1`)으로 비교합니다. 기존 색인과 섞으면 안 됩니다.
 
-**측정 결과 (2026-10-30) — 상태: 측정함, 기본값은 아직 off.**
+**측정 결과 (2026-10-30) — 상태: 기본값 nomic (ADR-005, 2026-11-01).**
 
 스위치 `EMBED_PREFIX=off|nomic`(기본 off)을 넣었습니다. Chroma 0.6은 임베딩 함수에 문서/질문 구분을 넘기지 않아서, nomic일 때는 접두어 붙인 글로 벡터를 직접 만들어 `embeddings=`·`query_embeddings=`로 넘깁니다. 저장하는 원문에는 접두어가 없습니다. 접두어 방식이 다른 컬렉션을 열면 오류가 납니다(컬렉션 메타데이터 `embed_prefix`).
 
@@ -439,7 +439,9 @@ qwen3:8b    capabilities: completion, tools, thinking | 8.2B Q4_K_M | ctx  40960
 | 출력 토큰 평균 | 362 → 443 |
 | 응답 시간 중앙값 | 7,324ms → 8,190ms |
 
-in_notes q02, q03, q05가 X → O (검색 근거가 새로 잡힌 문항), 나빠진 in_notes 문항 없음. 15문항이라 우연을 완전히 배제할 수는 없습니다. 기준선(10-28) → 대조군은 in_notes가 모두 같았습니다. 결과: `eval/results/20261030-2134_baseline-docs-prefix_rescored-v2.md`, `20261030-2139_baseline-docs-ctrl_rescored-v2.md`. 자세한 내용은 `docs/development-log.md` 10-30 "답변 평가" 절. 상태는 그대로 "측정함, 기본값은 아직 off"입니다.
+in_notes q02, q03, q05가 X → O (검색 근거가 새로 잡힌 문항), 나빠진 in_notes 문항 없음. 15문항이라 우연을 완전히 배제할 수는 없습니다. 기준선(10-28) → 대조군은 in_notes가 모두 같았습니다. 결과: `eval/results/20261030-2134_baseline-docs-prefix_rescored-v2.md`, `20261030-2139_baseline-docs-ctrl_rescored-v2.md`. 자세한 내용은 `docs/development-log.md` 10-30 "답변 평가" 절.
+
+**기본값 변경 (2026-11-01)** — 위 결과를 근거로 `EMBED_PREFIX` 기본값을 nomic으로 바꿨습니다 ([ADR-005](../decisions/005-embed-prefix-default.md)). `eval/env_docs.ps1`은 10-28 기준선 재현용으로 off를 그대로 둡니다. 접두어 없이 만든 기존 색인은 섞임 방지 장치 때문에 다시 색인해야 합니다.
 
 ---
 
