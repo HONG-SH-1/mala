@@ -8,5 +8,6 @@
 | [002](002-native-redis-phase1.md) | Phase 1 Native Redis (Docker 우회) | Accepted |
 | [003](003-phase4-hermes-router.md) | Phase 4 Hermes router + vault 폴백 RAG | Accepted (PoC verified) |
 | [004](004-eval-docs-snapshot.md) | 평가 대상을 docs 고정 사본으로 | Accepted |
+| [005](005-embed-prefix-default.md) | 임베딩 접두어 기본값을 nomic으로 | Accepted |
 
 새 ADR: `NNN-제목.md`, 위 표에 링크 추가.

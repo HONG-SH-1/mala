@@ -37,8 +37,8 @@ class Settings:
     use_hermes_router: bool
     # keyword: 키워드 점수로 다시 정렬 (기본, 지금 동작) | off: 벡터 거리순 그대로
     rag_rerank: str = "keyword"
-    # off: 임베딩 입력에 아무것도 안 붙임 (기본, 지금 동작) | nomic: search_document:/search_query: 접두어
-    embed_prefix: str = "off"
+    # nomic: search_document:/search_query: 접두어 (기본, ADR-005) | off: 아무것도 안 붙임 (10-28 기준선)
+    embed_prefix: str = "nomic"
 
 
 RAG_RERANK_MODES = ("keyword", "off")
@@ -49,7 +49,7 @@ def get_settings() -> Settings:
     rag_rerank = os.getenv("RAG_RERANK", "keyword").strip().lower() or "keyword"
     if rag_rerank not in RAG_RERANK_MODES:
         raise ValueError(f"RAG_RERANK은 {RAG_RERANK_MODES} 중 하나여야 합니다: {rag_rerank!r}")
-    embed_prefix = os.getenv("EMBED_PREFIX", "off").strip().lower() or "off"
+    embed_prefix = os.getenv("EMBED_PREFIX", "nomic").strip().lower() or "nomic"
     if embed_prefix not in EMBED_PREFIX_MODES:
         raise ValueError(
             f"EMBED_PREFIX는 {EMBED_PREFIX_MODES} 중 하나여야 합니다: {embed_prefix!r}"

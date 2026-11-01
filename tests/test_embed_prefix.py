@@ -83,7 +83,9 @@ def test_add_prefix():
     assert add_prefix(["a"], "nomic", "query") == ["search_query: a"]
 
 
-@pytest.mark.parametrize("value, want", [(None, "off"), ("", "off"), ("NOMIC", "nomic")])
+@pytest.mark.parametrize(
+    "value, want", [(None, "nomic"), ("", "nomic"), ("OFF", "off"), ("NOMIC", "nomic")]
+)
 def test_setting_values(monkeypatch, value, want):
     if value is None:
         monkeypatch.delenv("EMBED_PREFIX", raising=False)
