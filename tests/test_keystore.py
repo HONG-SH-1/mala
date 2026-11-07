@@ -26,7 +26,7 @@ def test_command_shape_and_stdin_is_inherited():
     r = FakeRunner()
     secret = get_secret("mala-gemini", runner=r, environ=ENV)
     cmd, kw = r.calls[0]
-    assert cmd == [ENV["KEEPASSXC_CLI"], "show", "-s", "-a", "password", ENV["MALA_KDBX_PATH"], "mala-gemini"]
+    assert cmd == [ENV["KEEPASSXC_CLI"], "show", "-s", "-a", "password", "--", ENV["MALA_KDBX_PATH"], "mala-gemini"]
     # 금고 암호는 사용자가 터미널에 직접 친다 → stdin/stderr를 가로채면 안 된다
     assert "stdin" not in kw and "stderr" not in kw and "input" not in kw
     assert kw["stdout"] == subprocess.PIPE
@@ -68,3 +68,29 @@ def test_key_shape_error_has_no_key_fragment():
 def test_redact():
     assert FAKE_KEY not in redact(f"boom {FAKE_KEY} boom", Secret(FAKE_KEY))
     assert redact("plain", None) == "plain"
+
+
+def test_entry_name_rules():
+    for good in ("mala-gemini", "a.b_c-1", "_x", "A9"):
+        get_secret(good, runner=FakeRunner(), environ=ENV)
+    for bad in ("-x", "--help", "-a", "a b", "a;b", "a/b", "a\nb", "한글", "a'b", "a|b", "$(x)"):
+        r = FakeRunner()
+        with pytest.raises(KeystoreError):
+            get_secret(bad, runner=r, environ=ENV)
+        assert r.calls == []  # 거부하면 CLI를 부르지 않는다
+
+
+def test_double_dash_comes_before_positional_arguments():
+    r = FakeRunner()
+    get_secret("mala-gemini", runner=r, environ=ENV)
+    cmd = r.calls[0][0]
+    assert cmd.index("--") == len(cmd) - 3 and cmd[-2:] == [ENV["MALA_KDBX_PATH"], "mala-gemini"]
+
+
+def test_cli_must_be_an_absolute_keepassxc_cli_exe():
+    for bad in ("keepassxc-cli.exe", r"C:\fake\other.exe", r"C:\fake\keepassxc-cli.cmd", r"..\keepassxc-cli.exe",
+                r"C:\fake\keepassxc-cli", "keepassxc-cli", r"relative\keepassxc-cli.exe"):
+        r = FakeRunner()
+        with pytest.raises(KeystoreError) as ei:
+            get_secret("mala-gemini", runner=r, environ={**ENV, "KEEPASSXC_CLI": bad})
+        assert "keepassxc-cli.exe" in str(ei.value) and r.calls == []

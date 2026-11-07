@@ -104,11 +104,26 @@ def test_importing_twice_is_idempotent_and_last_value_wins(folder, tmp_path):
     first = (folder / "human.jsonl").read_text(encoding="utf-8")
     import_human(folder, one)
     assert (folder / "human.jsonl").read_text(encoding="utf-8") == first
-    two = export(tmp_path, folder, [{"bid": ids[0], "verdict": "불합격", "reason": "b", "at": "t2"},
-                                    {"bid": ids[0], "verdict": "보류", "reason": "c", "at": "t3"}], "two.json")
-    import_human(folder, two)  # 한 파일 안에서도 마지막 값
+    two = export(tmp_path, folder, [{"bid": ids[0], "verdict": "불합격", "reason": "b", "at": "t2"}], "two.json")
+    import_human(folder, two)  # 다른 파일을 다시 합치면 마지막 값
     rows = load_human(folder)
-    assert len(rows) == 1 and next(iter(rows.values()))["human_verdict"] == "보류"
+    assert len(rows) == 1 and next(iter(rows.values()))["human_verdict"] == "불합격"
+
+
+def test_same_number_twice_in_one_file_is_rejected(folder, tmp_path):
+    ids, _ = bids(folder)
+    dup = export(tmp_path, folder, [{"bid": ids[0], "verdict": "불합격", "reason": "b", "at": "t2"},
+                                    {"bid": ids[0], "verdict": "보류", "reason": "c", "at": "t3"}], "dup.json")
+    with pytest.raises(HumanImportError) as ei:
+        import_human(folder, dup)
+    assert "두 번" in str(ei.value) and ids[0] in str(ei.value)
+    assert not (folder / "human.jsonl").exists()  # 아무것도 쓰지 않는다
+    p = tmp_path / "dupc.json"
+    p.write_text(json.dumps({"run": folder.name, "items": [], "criteria": [
+        {"bid": ids[0], "odd": True, "note": "a", "at": "t"}, {"bid": ids[0], "odd": False, "note": "b", "at": "t"}]}), encoding="utf-8")
+    with pytest.raises(HumanImportError):
+        import_human(folder, p)
+    assert not (folder / "criteria.jsonl").exists()
 
 
 def test_human_labels_stay_out_of_review_html(folder, tmp_path):
@@ -201,62 +216,117 @@ def test_guard_also_looks_in_data_eval(tmp_path):
         check_external_judges([str(jsonl)], ["gemini"], root)
 
 
-def write_override(d, stem, collection):
-    body = f'{stem}:\n  collection: {collection}\n  confirmed: "사후 확인"\n  evidence: ["근거"]\n'
-    (d / "source_overrides.yaml").write_text(body, encoding="utf-8")
-
-
-def test_override_used_only_when_md_has_no_collection_line(tmp_path):
-    f = write_result(tmp_path, "old-run", None)
-    with pytest.raises(SystemExit):
-        check_external_judges([f], ["gemini"])  # 확인 파일이 없으면 거부
-    write_override(tmp_path, "old-run", "mala_eval_docs")
-    assert collections_of(f) == ["mala_eval_docs"]
-    check_external_judges([f], ["codex", "gemini"])  # 이제 통과
-
-
-def test_override_is_ignored_when_md_has_collection_line(tmp_path):
-    f = write_result(tmp_path, "run-v", "mala_vault")
-    write_override(tmp_path, "run-v", "mala_eval_docs")  # .md가 우선: 덮어쓰지 못한다
-    assert collections_of(f) == ["mala_vault"]
-    with pytest.raises(SystemExit):
-        check_external_judges([f], ["gemini"])
-
-
-def test_override_gets_same_allow_list_rule(tmp_path):
-    for bad in ("mala_vault", "other_docs", "MALA_EVAL_DOCS"):
-        f = write_result(tmp_path, f"r-{bad}", None)
-        write_override(tmp_path, f"r-{bad}", bad)
-        with pytest.raises(SystemExit):
-            check_external_judges([f], ["codex"])
-        check_external_judges([f], ["claude"])
-
-
-def test_override_is_per_result_and_handles_bad_yaml(tmp_path):
-    a = write_result(tmp_path, "run-a", None)
-    b = write_result(tmp_path, "run-b", None)
-    write_override(tmp_path, "run-a", "mala_eval_docs")
-    check_external_judges([a], ["gemini"])
-    with pytest.raises(SystemExit):
-        check_external_judges([b], ["gemini"])  # 다른 결과에는 적용되지 않는다
-    (tmp_path / "source_overrides.yaml").write_text("{: 깨진", encoding="utf-8")
-    with pytest.raises(SystemExit):
-        check_external_judges([a], ["gemini"])  # 읽을 수 없으면 거부 (안전한 쪽)
-    (tmp_path / "source_overrides.yaml").write_text("run-a: 문자열\nrun-b:\n  collection: 5\n", encoding="utf-8")
-    for f in (a, b):
-        with pytest.raises(SystemExit):
-            check_external_judges([f], ["gemini"])
-
-
-def test_override_found_under_repo_root_and_rescored_name(tmp_path):
+def make_repo(tmp_path):
     root = tmp_path / "root"
     res = root / "eval" / "results"
     res.mkdir(parents=True)
+    return root, res
+
+
+def write_override(res, stem, collection):
+    body = f'{stem}:\n  collection: {collection}\n  confirmed: "사후 확인"\n  evidence: ["근거"]\n'
+    (res / "source_overrides.yaml").write_text(body, encoding="utf-8")
+
+
+def test_override_used_only_when_md_has_no_collection_line(tmp_path):
+    root, res = make_repo(tmp_path)
+    f = write_result(res, "old-run", None)
+    with pytest.raises(SystemExit):
+        check_external_judges([f], ["gemini"], root)  # 확인 파일이 없으면 거부
+    write_override(res, "old-run", "mala_eval_docs")
+    assert collections_of(f, root) == ["mala_eval_docs"]
+    check_external_judges([f], ["codex", "gemini"], root)  # 이제 통과
+
+
+def test_override_is_ignored_when_md_has_collection_line(tmp_path):
+    root, res = make_repo(tmp_path)
+    f = write_result(res, "run-v", "mala_vault")
+    write_override(res, "run-v", "mala_eval_docs")  # .md가 우선: 덮어쓰지 못한다
+    assert collections_of(f, root) == ["mala_vault"]
+    with pytest.raises(SystemExit):
+        check_external_judges([f], ["gemini"], root)
+
+
+def test_override_gets_same_allow_list_rule(tmp_path):
+    root, res = make_repo(tmp_path)
+    for bad in ("mala_vault", "other_docs", "MALA_EVAL_DOCS"):
+        f = write_result(res, f"r-{bad}", None)
+        write_override(res, f"r-{bad}", bad)
+        with pytest.raises(SystemExit):
+            check_external_judges([f], ["codex"], root)
+        check_external_judges([f], ["claude"], root)
+
+
+def test_override_is_per_result_and_handles_bad_yaml(tmp_path):
+    root, res = make_repo(tmp_path)
+    a = write_result(res, "run-a", None)
+    b = write_result(res, "run-b", None)
+    write_override(res, "run-a", "mala_eval_docs")
+    check_external_judges([a], ["gemini"], root)
+    with pytest.raises(SystemExit):
+        check_external_judges([b], ["gemini"], root)  # 다른 결과에는 적용되지 않는다
+    (res / "source_overrides.yaml").write_text("{: 깨진", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        check_external_judges([a], ["gemini"], root)  # 읽을 수 없으면 거부 (안전한 쪽)
+    (res / "source_overrides.yaml").write_text("run-a: 문자열\nrun-b:\n  collection: 5\n", encoding="utf-8")
+    for f in (a, b):
+        with pytest.raises(SystemExit):
+            check_external_judges([f], ["gemini"], root)
+
+
+def test_override_found_under_repo_results_with_rescored_name(tmp_path):
+    root, res = make_repo(tmp_path)
     write_override(res, "20261028-2205_baseline-docs", "mala_eval_docs")
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    f = write_result(elsewhere, "20261028-2205_baseline-docs", None)
+    f = write_result(res, "20261028-2205_baseline-docs", None)
     check_external_judges([f], ["gemini"], root)
+
+
+def test_override_is_read_only_from_repo_results_and_only_for_inputs_inside_it(tmp_path):
+    root, res = make_repo(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    f = write_result(other, "run-x", None)
+    write_override(other, "run-x", "mala_eval_docs")  # 입력 파일 옆의 파일: 읽지 않는다
+    assert collections_of(f, root) == []
+    write_override(res, "run-x", "mala_eval_docs")  # 레포 파일에 있어도 입력이 eval/results 밖이면 적용하지 않는다
+    assert collections_of(f, root) == []
+    with pytest.raises(SystemExit):
+        check_external_judges([f], ["codex"], root)
+    (root / "data" / "eval").mkdir(parents=True)
+    g = write_result(root / "data" / "eval", "run-x", None)  # data/eval 안도 마찬가지
+    assert collections_of(g, root) == []
+    # .. 로 eval/results를 빠져나가는 경로도 안 된다
+    sneaky = str(res / ".." / ".." / "other" / "run-x_rescored-v2.jsonl")
+    assert collections_of(sneaky, root) == []
+    # root를 모르면 아무 파일도 읽지 않는다
+    h = write_result(res, "run-h", None)
+    write_override(res, "run-h", "mala_eval_docs")
+    assert collections_of(h) == []
+    assert collections_of(h, root) == ["mala_eval_docs"]
+
+
+def test_override_with_duplicate_keys_is_rejected(tmp_path):
+    root, res = make_repo(tmp_path)
+    f = write_result(res, "run-d", None)
+    top = "run-d:\n  collection: mala_vault\nrun-d:\n  collection: mala_eval_docs\n"  # 뒤의 값이 앞을 덮는 모양
+    inner = "run-d:\n  collection: mala_eval_docs\n  collection: mala_vault\n"
+    for body in (top, inner):
+        (res / "source_overrides.yaml").write_text(body, encoding="utf-8")
+        assert collections_of(f, root) == []
+        with pytest.raises(SystemExit):
+            check_external_judges([f], ["codex", "gemini"], root)
+    (res / "source_overrides.yaml").write_text("run-d:\n  collection: mala_eval_docs\n", encoding="utf-8")
+    check_external_judges([f], ["codex"], root)  # 겹침이 없으면 통과
+
+
+def test_override_loader_is_a_safe_loader():
+    import yaml
+
+    from src.eval import judge_guard
+
+    assert issubclass(judge_guard._UniqueKeyLoader, yaml.SafeLoader)
+    with pytest.raises(yaml.YAMLError):
+        yaml.load("a: !!python/object/apply:os.getcwd []", Loader=judge_guard._UniqueKeyLoader)  # 파이썬 객체는 만들지 않는다
 
 
 def test_repo_override_file_covers_the_1028_baseline_and_passes_the_guard():

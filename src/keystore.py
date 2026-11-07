@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -18,6 +19,9 @@ from typing import Callable
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+_ENTRY_RE = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]*")  # 영문, 숫자, 점, 밑줄, 하이픈. 하이픈으로 시작하면 옵션처럼 읽히므로 거부
+CLI_FILE_NAME = "keepassxc-cli.exe"
 
 GEMINI_ENTRY = "mala-gemini"
 GEMINI_KEY_PREFIX = "AQ."
@@ -83,8 +87,14 @@ def get_secret(
         raise KeystoreError(".env에 KEEPASSXC_CLI와 MALA_KDBX_PATH가 필요합니다.")
     if not entry:
         raise KeystoreError("항목 이름이 비어 있습니다.")
+    if not _ENTRY_RE.fullmatch(entry):
+        raise KeystoreError("항목 이름 형식이 맞지 않습니다 (영문, 숫자, 점, 밑줄, 하이픈만, 하이픈으로 시작 금지).")
+    cli_path = Path(cli)
+    if not cli_path.is_absolute() or cli_path.name.lower() != CLI_FILE_NAME:
+        raise KeystoreError(f"KEEPASSXC_CLI는 {CLI_FILE_NAME}의 절대 경로여야 합니다.")
 
-    cmd = [cli, "show", "-s", "-a", "password", kdbx, entry]
+    # `--`: 이 뒤는 옵션이 아니라 위치 인자(금고, 항목)로만 읽힌다
+    cmd = [cli, "show", "-s", "-a", "password", "--", kdbx, entry]
     try:
         # stdin/stderr는 일부러 지정하지 않는다 → 터미널을 그대로 쓰므로 암호는 사용자가 직접 친다.
         proc = runner(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")

@@ -46,11 +46,12 @@ from src.eval.judge import (
     execute,
     finalize,
     pending_counts,
+    quiet_http_logs,
     select_items,
     shuffle_items,
 )
 from src.eval.judge_guard import check_external_judges
-from src.eval.judge_human import HumanImportError, import_human
+from src.eval.judge_human import HumanImportError, atomic_write_text, import_human
 from src.eval.judge_progress import Progress, load_history
 from src.eval.runner import load_questions
 from src.keystore import GEMINI_ENTRY, KeystoreError, check_gemini_key_shape, get_secret, redact
@@ -164,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--import-human", nargs=2, default=None, metavar=("실행폴더", "내보낸.json"),
                     help="review.html에서 내보낸 내 판정을 human.jsonl에 합치고 요약을 다시 만든다")
     args = ap.parse_args(argv)
+    quiet_http_logs()
 
     if args.rebuild or args.import_human:  # 면접관을 부르지 않는 작업: 작업 폴더, 키가 필요 없다
         try:
@@ -218,9 +220,8 @@ def main(argv: list[str] | None = None) -> int:
 
         out_dir.mkdir(parents=True, exist_ok=True)
         if not args.resume:
-            (out_dir / "inputs.json").write_text(
-                json.dumps({"files": list(files), "judges": names, "seed": seed, "limit": limit, "questions": qpath},
-                           ensure_ascii=False, indent=1), encoding="utf-8")
+            atomic_write_text(out_dir / "inputs.json", json.dumps(
+                {"files": list(files), "judges": names, "seed": seed, "limit": limit, "questions": qpath}, ensure_ascii=False, indent=1))
 
         # 면접관 실행은 레포 밖 폴더(JUDGE_WORKDIR)에서 한다 (CLAUDE.md, 설정 파일이 섞이지 않게)
         specs, secrets = _build_specs(names, workdir, resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM")))

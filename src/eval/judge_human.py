@@ -104,6 +104,8 @@ def parse_export(text: str, run_name: str, valid_bids: set[str]) -> tuple[dict[s
             errors.append(f"{where} ({bid}): note는 {MAX_NOTE}자 이하 글이어야 함")
         elif not isinstance(at, str) or len(at) > 40:
             errors.append(f"{where} ({bid}): at 형식 오류")
+        elif bid in crit:
+            errors.append(f"{where} ({bid}): 같은 번호가 한 파일에 두 번 있음")
         else:
             crit[bid] = {"odd": odd, "note": " ".join(note.split()), "at": at}
     for i, it in enumerate(data["items"], 1):
@@ -127,6 +129,9 @@ def parse_export(text: str, run_name: str, valid_bids: set[str]) -> tuple[dict[s
             continue
         if not isinstance(blind, bool):
             errors.append(f"{where} ({bid}): blind는 true/false여야 함")
+            continue
+        if bid in out:
+            errors.append(f"{where} ({bid}): 같은 번호가 한 파일에 두 번 있음")
             continue
         out[bid] = {"verdict": verdict, "reason": reason.strip(), "at": at, "blind": blind}
     if errors:
@@ -167,12 +172,17 @@ def import_human(out_dir: Path, export_file: str | Path) -> int:
     return len(parsed)
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """임시 파일에 쓴 뒤 os.replace로 바꿔 끼운다. 쓰다 멈춰도 원래 파일이 반쪽이 되지 않는다."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _write_rows(path: Path, rows: dict[str, dict], only_if: bool) -> None:
     if not only_if:
         return
-    tmp = path.with_suffix(".jsonl.tmp")
-    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows.values()), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows.values()))
 
 
 def criteria_section(criteria: dict[str, dict]) -> list[str]:
