@@ -453,6 +453,21 @@ v1과 v2는 가져온 청크가 같고 라벨만 다르다. 오른 몫은 검색
 - `eval/env_docs.ps1`은 10-28 기준선 재현용으로 `EMBED_PREFIX=off`를 그대로 둔다.
 - 기존 실제 볼트 색인 `mala_vault`는 접두어 없이 만들어서, nomic으로 열면 섞임 방지 오류가 난다. 새 컬렉션 `mala_vault_prefix`(매니페스트 `data/index_manifest_prefix.json`, 실패 기록 `data/index_failures_prefix.jsonl`)로 다시 색인한다. `mala_vault`와 `data/index_manifest.json`은 되돌릴 때를 위해 그대로 둔다.
 
+## 2026-11-07 — 면접관 자동화 도구 (보조 도구, 공식 판정 아님)
+
+- 만든 것: `src/scripts/eval_judge.py`(실행), `src/eval/judge.py`(면접관, 재시도, 모델 고정, 다수결), `src/keystore.py`(KeePassXC에서 키를 메모리로만 꺼냄). 테스트 `tests/test_eval_judge.py`, `tests/test_keystore.py`.
+- 공식 판정(`eval_rescore`, `manual.yaml`)은 바꾸지 않았다. 1단계 중이라 따로 쓰는 도구다.
+- 비밀값: 키는 레포, `.env`, 환경변수, 로그, 결과 파일 어디에도 두지 않는다. 금고 암호는 사용자가 터미널에 직접 친다.
+- `.claude/settings.json`에 deny 규칙 추가 (KeePassXC CLI, .kdbx, ~/.codex, cmdkey, .env 쓰기, 실제 판정 실행). Bash/PowerShell 규칙은 안전망이지 보안 경계가 아니다.
+- 첫 실행 10건(세 결과에서 고정 시드로 뽑음). 최종 판정과 일치한 수: Claude haiku(`claude-haiku-5-5`) 9/10, Codex(`gpt-6-luna`, effort low) 10/10, Gemini 3.5 Flash Lite 10/10. 10건이라 결론은 아니다.
+- Codex: `--ignore-user-config`가 keyring 설정까지 무시해서 인증에 실패했다. `-c cli_auth_credentials_store=keyring`을 더해 해결했고, 평문 `auth.json`은 생기지 않았다.
+- Gemini 무료 한도(11-07 AI Studio 기준): Flash는 분당 5회, 하루 20회. Flash Lite는 분당 15회, 하루 500회. 503으로 실패한 요청도 하루 한도에 잡혔다.
+- `gemini-3.5-flash`로 요청하면 3.6 Flash가 응답하고 한도도 3.6에 잡힌다. 그래서 요청한 모델(`model_requested`)과 응답한 모델(`model_reported`)을 따로 남긴다.
+- Flash는 하루 20회라 120건에 6일이 걸린다. 그래서 Gemini는 3.5 Flash Lite로 고정했다.
+- Codex는 10건에 약 14만 토큰을 썼고, 무료 월 한도의 약 1%다.
+- 결과 파일에서 키 조각 검사 결과는 0건이다.
+- 고친 것: Ctrl+C가 안 먹혔다(503 재시도 대기 중). 원인은 인자 없는 `thread.join()`이 윈도우에서 Ctrl+C를 받지 못하는 것과 `time.sleep` 대기였다. 이제 대기는 중단 신호로 바로 깨고, Ctrl+C 후 5초 안에 저장하고 `--resume` 명령을 출력한다. Gemini 요청 타임아웃은 120초에서 60초로 줄였다. summary의 일치율은 최종 합격 건과 불합격 건으로 나눠 보여 준다.
+
 ---
 
 ## 5일 한눈에
