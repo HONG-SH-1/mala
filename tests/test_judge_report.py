@@ -100,7 +100,9 @@ def test_no_external_requests_in_html(tmp_path):
     run(tmp_path, make_items(3))
     html = html_of(tmp_path)
     assert not re.search(r"https?://", html)
-    assert not re.search(r"""\s(src|href|action)\s*=\s*["']""", html)
+    assert not re.search(r"""\s(src|action)\s*=\s*["']""", html)
+    # 링크는 같은 폴더의 세 화면으로 가는 상대 링크뿐이다 (이동 줄)
+    assert sorted(re.findall(r"""\shref\s*=\s*["']([^"']*)["']""", html)) == ["progress.html", "summary.html"]
     assert "@import" not in html and "url(" not in html
     assert not re.search(r"<(link|iframe|img|form|object|embed)\b", html)
     assert "fetch(" not in html and "XMLHttpRequest" not in html and "WebSocket" not in html

@@ -53,6 +53,7 @@ from src.eval.judge import (
 from src.eval.judge_guard import check_external_judges
 from src.eval.judge_human import HumanImportError, atomic_write_text, import_human
 from src.eval.judge_progress import Progress, load_history
+from src.eval.judge_web import write_static
 from src.eval.runner import load_questions
 from src.keystore import GEMINI_ENTRY, KeystoreError, check_gemini_key_shape, get_secret, redact
 from src.scripts.eval_rescore import load_records
@@ -147,7 +148,34 @@ def rebuild(out_dir: Path) -> str:
     items, state, meta = load_folder(out_dir)
     retries_log = out_dir / "retries.log"
     retries = len(retries_log.read_text(encoding="utf-8").splitlines()) if retries_log.exists() else 0
-    return finalize(out_dir, items, state, meta["seed"], retries)
+    if state.get("ended") is False:  # 끝나지 않은(강제 종료로 보이는) 실행: 결과 파일은 그대로 두고 화면만 정리한다
+        write_static(out_dir, items, ensure_blind_map(out_dir, items), state)
+        return ""
+    summary = finalize(out_dir, items, state, meta["seed"], retries)
+    write_static(out_dir, items, ensure_blind_map(out_dir, items), state)  # 남아 있던 '실행 중' 화면을 정리 (새로 고침 없음)
+    return summary
+
+
+def folder_problem(raw: str, *, need_run_files: bool = True) -> str | None:
+    """실행 폴더로 쓸 수 없으면 짧은 안내 문구, 쓸 수 있으면 None (OSError 대신 보여 준다)."""
+    p = Path(raw)
+    if not p.is_dir():
+        return f"폴더가 없습니다: {raw}"
+    if need_run_files:
+        missing = [n for n in ("inputs.json", "run.json") if not (p / n).is_file()]
+        if missing:
+            return f"실행 폴더가 아닙니다 ({', '.join(missing)}이 없음): {raw}"
+    return None
+
+
+def _open_page(path: Path) -> None:
+    """progress.html을 기본 브라우저로 연다. 실패해도 실행은 계속한다."""
+    try:
+        import webbrowser
+
+        webbrowser.open(path.resolve().as_uri())
+    except Exception:  # noqa: BLE001 - 브라우저가 없어도 판정은 해야 한다
+        print("브라우저를 열지 못했습니다. 직접 여세요:", path, flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -161,11 +189,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gemini-rpm", type=float, default=None, help="Gemini 분당 요청 수 상한 (기본: .env GEMINI_JUDGE_RPM, 없으면 4. 0이면 제한 없음)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--blind", action="store_true", help="진행 줄에서 판정과 (갈림)을 숨기고 진행 수와 예상 시간만 보여 준다")
+    ap.add_argument("--open", action="store_true", help="시작할 때 progress.html을 기본 브라우저로 연다 (실행 중 진행 상황, 5초마다 새로 고침)")
     ap.add_argument("--rebuild", default=None, metavar="실행폴더", help="판정 호출 없이 review.md, review.html, summary.md를 다시 만든다")
     ap.add_argument("--import-human", nargs=2, default=None, metavar=("실행폴더", "내보낸.json"),
                     help="review.html에서 내보낸 내 판정을 human.jsonl에 합치고 요약을 다시 만든다")
     args = ap.parse_args(argv)
     quiet_http_logs()
+
+    problem = None
+    if args.rebuild:
+        problem = folder_problem(args.rebuild)
+    elif args.import_human:
+        problem = folder_problem(args.import_human[0], need_run_files=False)
+        if problem is None and not Path(args.import_human[1]).is_file():
+            problem = f"파일이 없습니다: {args.import_human[1]}"
+    elif args.resume:
+        problem = folder_problem(args.resume)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
 
     if args.rebuild or args.import_human:  # 면접관을 부르지 않는 작업: 작업 폴더, 키가 필요 없다
         try:
@@ -175,8 +217,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"사람 판정 {count}건을 합쳤습니다.")
             else:
                 folder = Path(args.rebuild)
-            rebuild(folder)
-            print(f"다시 만들었습니다: {folder / 'summary.md'}, {folder / 'review.html'}")
+            summary = rebuild(folder)
+            if not summary:
+                print(f"이 실행은 끝나지 않았습니다 (강제 종료로 보임). progress.html만 고쳤습니다: {folder / 'progress.html'}\n"
+                      f"이어서 돌리려면:\n  python -m src.scripts.eval_judge --resume {folder}")
+                return 0
+            print(f"다시 만들었습니다: {folder / 'summary.md'}, {folder / 'review.html'}, {folder / 'progress.html'}")
             return 0
         except HumanImportError as exc:
             print(f"오류: {exc}", file=sys.stderr)
@@ -219,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
         check_external_judges(list(files), names, _ROOT)
 
         out_dir.mkdir(parents=True, exist_ok=True)
+        if args.resume:  # 키 입력을 기다리는 동안 남아 있던 '실행 중' 화면부터 지금 상태로 정리한다
+            old = json.loads((out_dir / "run.json").read_text(encoding="utf-8"))
+            write_static(out_dir, items, ensure_blind_map(out_dir, items), old)
         if not args.resume:
             atomic_write_text(out_dir / "inputs.json", json.dumps(
                 {"files": list(files), "judges": names, "seed": seed, "limit": limit, "questions": qpath}, ensure_ascii=False, indent=1))
@@ -235,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
             min_sec={"gemini": 60.0 / gemini_rpm} if gemini_rpm else None,
         )
         print(progress.start_line(pending_counts(out_dir, items, names)), flush=True)
-        summary = execute(specs, items, out_dir, seed=seed, resume=bool(args.resume), secrets=tuple(secrets), stop=stop, progress=progress)
+        summary = execute(specs, items, out_dir, seed=seed, resume=bool(args.resume), secrets=tuple(secrets), stop=stop, progress=progress,
+                          on_page=(lambda: _open_page(out_dir / "progress.html")) if args.open else None)
         print(summary)
         if stop.is_set():
             print(f"\n중단했습니다. 판정한 건은 저장했습니다. 이어서 돌리려면:\n  python -m src.scripts.eval_judge --resume {out_dir}")

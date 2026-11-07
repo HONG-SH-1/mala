@@ -30,6 +30,7 @@ import httpx
 from src.eval.runner import Question
 from src.eval.judge_human import atomic_write_text, criteria_section, human_section, load_criteria, load_human
 from src.eval.judge_report import write_review_html
+from src.eval.judge_web import ProgressPage, count_retries, write_summary_html
 from src.keystore import Secret, redact
 
 def quiet_http_logs() -> None:
@@ -567,11 +568,14 @@ class RetryLog:
                 f.write(line + "\n")
 
 
-def call_with_retry(judge, prompt: str, *, max_attempts: int, log: RetryLog, sleep: Callable[[float], None]) -> tuple[CallResult, int]:
+def call_with_retry(judge, prompt: str, *, max_attempts: int, log: RetryLog, sleep: Callable[[float], None],
+                    stop: threading.Event | None = None) -> tuple[CallResult, int]:
     for attempt in range(1, max_attempts + 1):
         try:
             return judge.call(prompt), attempt
         except CallError as exc:
+            if stop is not None and stop.is_set():
+                raise Interrupted from None  # Ctrl+C로 끊은 호출의 실패는 재시도 기록(retries.log)에 넣지 않는다
             exc.attempts = attempt
             last = attempt == max_attempts
             if exc.kind != "transient":
@@ -594,7 +598,7 @@ class JudgeSpec:
     unavailable: str | None = None  # 시작도 못 하는 이유 (예: 금고에서 키를 못 꺼냄). 있으면 건너뛴다.
 
 
-def pick_model(spec: JudgeSpec, *, log: RetryLog, sleep: Callable[[float], None]) -> dict:
+def pick_model(spec: JudgeSpec, *, log: RetryLog, sleep: Callable[[float], None], stop: threading.Event | None = None) -> dict:
     """우선순위 순서로 짧은 확인 요청(최대 3번)을 보내 되는 첫 모델을 고른다."""
     if spec.unavailable:
         return {"status": "skipped", "model": None, "reason": spec.unavailable}
@@ -604,7 +608,7 @@ def pick_model(spec: JudgeSpec, *, log: RetryLog, sleep: Callable[[float], None]
         if not spec.ping:
             return {"status": "active", "model": model, "reason": ""}
         try:
-            call_with_retry(judge, PING_PROMPT, max_attempts=PING_ATTEMPTS, log=log, sleep=sleep)
+            call_with_retry(judge, PING_PROMPT, max_attempts=PING_ATTEMPTS, log=log, sleep=sleep, stop=stop)
         except CallError as exc:
             reasons.append(f"{model}: {exc.status}")
             if exc.kind == "daily":  # 다른 모델로 또 보내면 한도만 깎인다
@@ -644,7 +648,7 @@ def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep
         base = {"key": it.key, "label": it.label, "id": it.qid, "repeat": it.repeat, "judge": judge.name}
         t0 = time.time()
         try:
-            res, attempts = call_with_retry(judge, it.prompt, max_attempts=RUN_ATTEMPTS, log=log, sleep=sleep)
+            res, attempts = call_with_retry(judge, it.prompt, max_attempts=RUN_ATTEMPTS, log=log, sleep=sleep, stop=stop)
         except Interrupted:
             return {"stopped": STOP_MESSAGE}  # 이 건은 기록하지 않는다 (이어하기에서 다시 돈다)
         except CallError as exc:
@@ -751,6 +755,18 @@ def reconcile(out_dir: Path, state: dict) -> dict:
     return {"duplicates": dup, "broken": broken, "missing": missing}
 
 
+def normalize_judges(out_dir: Path, judges: dict) -> dict:
+    """건너뜀은 시작도 못 한 면접관에게만 쓴다. 판정 줄이 하나라도 있으면 멈춤으로 본다 (예전 기록 보정)."""
+    out = {}
+    for n, st in judges.items():
+        st = dict(st)
+        if st.get("status") == "skipped" and load_rows(out_dir / f"judge_{n}.jsonl"):
+            st["status"] = "stopped"
+            st["stopped"] = st.get("reason") or STOP_MESSAGE
+        out[n] = st
+    return out
+
+
 def pending_counts(out_dir: Path, items: list[Item], names: list[str]) -> dict[str, int]:
     """면접관마다 아직 판정이 없거나 판정불가인 건 수 (시작 예상 시간 계산용)."""
     out: dict[str, int] = {}
@@ -776,9 +792,11 @@ def decide(verdicts: dict[str, str]) -> tuple[str, str]:
 
 def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: int) -> str:
     """판정 파일들을 읽어 majority.jsonl, review.md, blind_map.json, summary.md를 쓴다. summary 본문을 돌려준다."""
-    judges = state["judges"]
-    active = [n for n, s in judges.items() if s["status"] != "skipped"]
+    judges = normalize_judges(out_dir, state["judges"])
+    active = [n for n, st in judges.items() if st["status"] != "skipped"]
     rows = {n: load_rows(out_dir / f"judge_{n}.jsonl") for n in active}
+    # 어떤 면접관이든 판정 줄이 없는 건은 아직 안 돌린 건이다 (실패해서 판정불가로 남은 건과 다르다): 사람이 볼 목록에서 뺀다
+    remaining = {it.key for it in items if any(it.key not in rows[n] for n in active)}
 
     def verdict_of(name: str, it: Item) -> str:
         r = rows[name].get(it.key)
@@ -787,6 +805,12 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
     maj: list[dict] = []
     flagged: list[tuple[Item, dict, list[str]]] = []
     for it in items:
+        if it.key in remaining:
+            maj.append({"key": it.key, "label": it.label, "id": it.qid, "repeat": it.repeat,
+                        "verdicts": {n: (rows[n][it.key]["verdict"] if it.key in rows[n] else "남음") for n in active},
+                        "majority": UNDECIDED, "note": "남은 건", "auto_correct": it.auto_correct, "correct": it.correct,
+                        "review": False})
+            continue
         vs = {n: verdict_of(n, it) for n in active}
         decision, note = decide(vs) if vs else (UNDECIDED, "면접관 없음")
         reasons: list[str] = []
@@ -835,6 +859,8 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
         judges_data = {}
         for n_name in active:
             r = rows[n_name].get(it.key)
+            if r is None:
+                continue  # 아직 안 돌린 건: 판정불가로 꾸미지 않고 비워 둔다
             judges_data[n_name] = (
                 {"verdict": r["verdict"], "cause": r.get("cause"), "reason": r.get("reason")} if r and r["verdict"] != UNAVAILABLE
                 else {"verdict": UNAVAILABLE, "cause": None, "reason": None}
@@ -852,6 +878,7 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
     summary = _render_summary(items, judges, active, rows, maj, len(flagged), retries, bool(state.get("interrupted")),
                               load_human(out_dir), load_criteria(out_dir), state.get("reconciled"))
     (out_dir / "summary.md").write_text(summary, encoding="utf-8")
+    write_summary_html(out_dir, summary)  # summary.md와 같은 내용을 브라우저용으로 (md는 그대로 둔다)
     return summary
 
 
@@ -895,9 +922,13 @@ def _render_summary(items, judges, active, rows, maj, review_count, retries, int
         return "-" if b == 0 else f"{a}/{b} ({a / b:.0%})"
 
     by_key = {it.key: it for it in items}
-    out = ["# 면접관 요약", "", f"- 대상 건수: {len(items)}", f"- 사람이 볼 건수: {review_count}", f"- 재시도(로그 줄) 수: {retries}", ""]
+    left = sum(1 for m in maj if m["note"] == "남은 건")
+    out = ["# 면접관 요약", "", f"- 대상 건수: {len(items)}", f"- 사람이 볼 건수: {review_count}"]
+    if left:
+        out.append(f"- 남은 건 {left} (--resume으로 이어 하기)")
+    out += [f"- 재시도(로그 줄) 수: {retries}", ""]
     if interrupted:
-        out[1:1] = ["", f"**중단된 실행입니다: {STOP_MESSAGE}.** 판정하지 못한 건은 판정 불가로 셉니다."]
+        out[1:1] = ["", f"**중단된 실행입니다: {STOP_MESSAGE}.** 아직 안 돌린 건은 \"남은 건\"으로 따로 셉니다 (판정 불가나 사람이 볼 건에 넣지 않음)."]
     if reconciled:
         out += [f"- 이어하기 때 판정 파일 기준으로 맞춘 건수: 중복 {reconciled.get('duplicates', 0)}건 정리, "
                 f"깨진 줄 {reconciled.get('broken', 0)}건 버림, 상태엔 끝났는데 판정이 없어 다시 판정한 건 {reconciled.get('missing', 0)}건", ""]
@@ -918,7 +949,9 @@ def _render_summary(items, judges, active, rows, maj, review_count, retries, int
         by_truth = {True: [0, 0], False: [0, 0]}  # 최종 판정 -> [일치, 전체]
         for it in items:
             r = rows[name].get(it.key)
-            v = r["verdict"] if r else UNAVAILABLE
+            if r is None:
+                continue  # 아직 안 돌린 건
+            v = r["verdict"]
             if v == UNAVAILABLE:
                 unavail += 1
             elif v == "보류":
@@ -983,6 +1016,7 @@ def execute(
     secrets: tuple = (),
     stop: threading.Event | None = None,
     progress=None,
+    on_page: Callable[[], None] | None = None,
 ) -> str:
     """면접관마다 스레드 하나로 돌리고 마지막에 결과 파일을 쓴다. summary 본문을 돌려준다."""
     stop = stop if stop is not None else threading.Event()
@@ -997,17 +1031,36 @@ def execute(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     run_path = out_dir / "run.json"
-    state: dict = {"seed": seed, "judges": {}}
+    state: dict = {"seed": seed, "judges": {}, "started": now().isoformat(timespec="seconds")}
     if resume and run_path.exists():
         state = json.loads(run_path.read_text(encoding="utf-8"))
+        state["resumed_at"] = now().isoformat(timespec="seconds")
         fixed = reconcile(out_dir, state)
         if any(fixed.values()):
             state["reconciled"] = fixed
         else:
             state.pop("reconciled", None)
+    # 시작하자마자 상태를 남긴다: 창을 닫아 강제로 끝나도 --resume, --rebuild로 이 폴더를 다시 다룰 수 있게 (ended=false)
+    state["items"] = [it.key for it in items]
+    state["ended"] = False
+    state["blind"] = bool(progress.blind) if progress is not None else bool(state.get("blind", True))
+    atomic_write_text(run_path, json.dumps(state, ensure_ascii=False, indent=1))
     log = RetryLog(out_dir / "retries.log", now)
     log.count = len((out_dir / "retries.log").read_text(encoding="utf-8").splitlines()) if (out_dir / "retries.log").exists() else 0
     lock = threading.Lock()
+    finished: set[str] = set()  # 이번 실행에서 일을 마친(끝, 멈춤, 건너뜀) 면접관
+    started: dict[str, str | None] = {}  # 판정을 시작한 면접관 -> 고정한 모델 (건너뜀과 구분하려고)
+
+    def finished_infos() -> dict[str, dict]:
+        with lock:
+            return {n: dict(state["judges"][n]) for n in finished if n in state["judges"]}
+
+    page = ProgressPage(out_dir, items, ensure_blind_map(out_dir, items), [sp.name for sp in specs], blind=state["blind"],
+                        infos=finished_infos, retries=lambda: log.count,
+                        started=str(state.get("resumed_at") or state.get("started") or ""), progress=progress, now=now)
+    page.write("running")
+    if on_page is not None:
+        on_page()  # 첫 화면이 써진 뒤 (예: 브라우저 열기)
 
     def worker(spec: JudgeSpec) -> None:
         prev = state["judges"].get(spec.name)
@@ -1015,9 +1068,10 @@ def execute(
             if prev and prev["status"] in ("active", "stopped"):
                 chosen = {"status": "active", "model": prev["model"], "reason": ""}  # 이어하기: 같은 모델로 고정
             else:
-                chosen = pick_model(spec, log=log, sleep=sleep)
+                chosen = pick_model(spec, log=log, sleep=sleep, stop=stop)
             info: dict = dict(chosen)
             if chosen["status"] == "active":
+                started[spec.name] = chosen["model"]
                 if progress:
                     done = {k: r["verdict"] for k, r in load_rows(out_dir / f"judge_{spec.name}.jsonl").items() if r["verdict"] != UNAVAILABLE}
                     progress.judge_ready(spec.name, done)
@@ -1032,6 +1086,7 @@ def execute(
             info = {"status": "skipped", "model": None, "reason": redact(f"예기치 못한 오류 {type(exc).__name__}", *secrets)}
         with lock:
             state["judges"][spec.name] = info
+            finished.add(spec.name)
         if progress and info["status"] != "active":
             progress.judge_out(spec.name)  # 건너뛰었거나 멈춘 면접관은 빼고 건 완료를 센다
 
@@ -1045,6 +1100,7 @@ def execute(
                 t.join(0.2)
             if progress:
                 progress.tick()
+            page.tick()
     except KeyboardInterrupt:
         stop.set()
         try:
@@ -1060,8 +1116,11 @@ def execute(
             pass  # 한 번 더 누르면 기다리지 않고 저장으로 넘어간다
     if stop.is_set():
         state["interrupted"] = True
-        for spec in specs:  # 요청이 끝나지 않은 스레드의 면접관은 이전 상태를 그대로 두거나, 없으면 건너뜀으로 표시
-            state["judges"].setdefault(spec.name, {"status": "skipped", "model": None, "reason": STOP_MESSAGE})
+        for spec in specs:  # 요청이 끝나지 않은 스레드의 면접관은 이전 상태를 그대로 둔다. 없으면: 시작했던 면접관은 멈춤, 시작도 못 했으면 건너뜀
+            if spec.name in started:
+                state["judges"].setdefault(spec.name, {"status": "stopped", "model": started[spec.name], "reason": "", "stopped": STOP_MESSAGE})
+            else:
+                state["judges"].setdefault(spec.name, {"status": "skipped", "model": None, "reason": STOP_MESSAGE})
     else:
         state.pop("interrupted", None)
     # 스레드가 끝난 순서가 아니라 지정한 면접관 순서로 고정 (요약, 화면의 열 순서가 매번 같게)
@@ -1069,5 +1128,8 @@ def execute(
     state["judges"] = {n: state["judges"][n] for n in order if n in state["judges"]} | {
         n: v for n, v in state["judges"].items() if n not in order}
     state["items"] = [it.key for it in items]
+    state["ended"] = True
     atomic_write_text(run_path, json.dumps(state, ensure_ascii=False, indent=1))
+    finished.update(state["judges"])  # 마지막 화면은 모든 면접관의 최종 상태로
+    page.write("ended", interrupted=bool(state.get("interrupted")), expect_outputs=True)  # Ctrl+C로 멈춰도 마지막 상태가 남는다
     return finalize(out_dir, items, state, seed, log.count)

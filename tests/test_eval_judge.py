@@ -823,6 +823,13 @@ def test_ctrl_c_terminates_children_and_records_no_failed_row(tmp_path, monkeypa
             raise CallError("transient", "exit1")  # 자식이 끝나서 나는 실패
 
     class Prog:
+        blind = False
+
+        def eta_text(self):
+            return "계산 중"
+
+        def completed_order(self):
+            return []
         def judge_ready(self, *a):
             pass
 

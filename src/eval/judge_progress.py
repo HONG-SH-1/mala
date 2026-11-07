@@ -83,6 +83,7 @@ class Progress:
         self.state = {j: "pending" for j in self.judges}  # pending | ready | out
         self.completed: set[str] = set()
         self.fresh: set[str] = set()  # 이 실행에서 새로 판정이 나온 건
+        self.order: list[str] = []  # 건이 끝난 순서 (progress.html의 최근 건)
         self._last = clock()
         self._lock = threading.RLock()
 
@@ -121,6 +122,7 @@ class Progress:
                 continue
             if all(key in self.verdicts[j] for j in active):
                 self.completed.add(key)
+                self.order.append(key)
                 if key in self.fresh:
                     self.out(self._item_line(key, active))
 
@@ -176,6 +178,16 @@ class Progress:
                 if self.state[j] == "ready":
                     remaining[j] = self.total - done
             return f"진행 {' · '.join(parts)} | 건당 평균 {' · '.join(avg_parts)} | 남은 예상 {self._eta(remaining, avgs)}"
+
+    def eta_text(self) -> str:
+        """progress.html용 남은 예상 시간 (터미널 줄과 같은 계산)."""
+        with self._lock:
+            remaining = {j: self.total - len(self.verdicts[j]) for j in self.judges if self.state[j] == "ready"}
+            return self._eta(remaining, {j: self._avg(j) for j in self.judges}) if remaining else "-"
+
+    def completed_order(self) -> list[str]:
+        with self._lock:
+            return list(self.order)
 
     def tick(self) -> None:
         """메인 대기 루프에서 자주 부른다. 간격이 지났을 때만 한 줄 찍는다."""

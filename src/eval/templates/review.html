@@ -21,6 +21,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
 header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; }
 h1 { font-size: 16px; margin: 0 0 6px; }
 h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent); }
+.nav { font-size: 13px; margin: 0 0 4px; }
+.nav a, .nav b { margin-right: 14px; }
+.nav a { color: var(--accent); font-weight: 600; }
 .bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 main { max-width: 960px; margin: 0 auto; padding: 16px; }
 button, select, input[type="text"] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
@@ -77,6 +80,7 @@ textarea { width: 100%; min-height: 90px; font: 12px/1.4 ui-monospace, Consolas,
 </head>
 <body>
 <header>
+  <nav class="nav"><a href="progress.html">진행 화면</a><b>결과 보기</b><a href="summary.html">요약</a></nav>
   <h1>면접관 결과 보기 <span class="muted" id="runname"></span></h1>
   <div class="bar" id="topbar"></div>
 </header>
