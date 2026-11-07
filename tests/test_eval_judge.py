@@ -314,7 +314,7 @@ def test_review_list_hides_label_and_flags(tmp_path):
     execute([JudgeSpec("claude", [None], lambda m: a, ping=False), JudgeSpec("codex", ["c1"], lambda m: b, ping=False)],
             items, tmp_path, seed=3, sleep=lambda s: None, now=NOW)
     review = (tmp_path / "review.md").read_text(encoding="utf-8")
-    assert "접두어" not in review and "기준선" not in review and "#01" in review
+    assert "접두어" not in review and "기준선" not in review and "B001" in review
     assert "면접관끼리 엇갈림" in review
     bm = json.loads((tmp_path / "blind_map.json").read_text(encoding="utf-8"))
     assert {v["label"] for v in bm.values()} == {"접두어", "기준선"}

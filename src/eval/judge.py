@@ -25,6 +25,8 @@ from typing import Callable
 import httpx
 
 from src.eval.runner import Question
+from src.eval.judge_human import criteria_section, human_section, load_criteria, load_human
+from src.eval.judge_report import write_review_html
 from src.keystore import Secret, redact
 
 JUDGE_INSTRUCTION = (
@@ -176,6 +178,8 @@ class Item:
     correct: bool | None
     prompt: str = ""
     expected_sources: list[str] = field(default_factory=list)
+    manual_correct: bool | None = None  # manual.yaml에서 사람이 고친 값 (없으면 None)
+    retrieved_sources: list[str] = field(default_factory=list)  # MALA가 찾아온 출처
 
 
 def build_prompt(q: Question, answer: str) -> str:
@@ -217,6 +221,8 @@ def build_items(records: list[dict], questions: list[Question]) -> list[Item]:
                 correct=r.get("correct"),
                 prompt=build_prompt(q, str(r.get("answer") or "")),
                 expected_sources=q.expected_sources,
+                manual_correct=r.get("manual_correct"),
+                retrieved_sources=[str(x) for x in (r.get("retrieved_sources") or [])],
             )
         )
     return items
@@ -548,7 +554,7 @@ def load_rows(path: Path) -> dict[str, dict]:
     return rows
 
 
-def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep: Callable[[float], None], fail_limit: int = CONSECUTIVE_FAIL_LIMIT, stop: threading.Event | None = None) -> dict:
+def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep: Callable[[float], None], fail_limit: int = CONSECUTIVE_FAIL_LIMIT, stop: threading.Event | None = None, on_row: Callable[[dict], None] | None = None) -> dict:
     """items 중 아직 판정이 없거나 판정불가인 건만 돈다. 멈추면 이유를 돌려준다."""
     done = {k for k, r in load_rows(rows_path).items() if r["verdict"] != UNAVAILABLE}
     consecutive = 0
@@ -567,6 +573,8 @@ def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep
             row = {**base, "model_requested": judge.model, "model_reported": None, "verdict": UNAVAILABLE, "cause": None, "reason": None,
                    "status": f"failed:{exc.status}", "attempts": exc.attempts, "tokens": None}
             _append(rows_path, row)
+            if on_row:
+                on_row(row)
             if exc.kind != "transient":
                 if exc.kind == "daily":
                     return {"stopped": DAILY_QUOTA_MESSAGE}
@@ -581,8 +589,11 @@ def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep
             verdict, cause, reason, status = "보류", None, f"형식 오류: {err}", "format_error"
         else:
             verdict, cause, reason, status = data["verdict"], data["cause"], data["reason"], "ok"
-        _append(rows_path, {**base, "model_requested": judge.model, "model_reported": res.model, "verdict": verdict, "cause": cause, "reason": reason,
-                            "status": status, "attempts": attempts, "tokens": res.tokens, "sec": round(time.time() - t0, 1)})
+        row = {**base, "model_requested": judge.model, "model_reported": res.model, "verdict": verdict, "cause": cause, "reason": reason,
+               "status": status, "attempts": attempts, "tokens": res.tokens, "sec": round(time.time() - t0, 1)}
+        _append(rows_path, row)
+        if on_row:
+            on_row(row)
     return {"stopped": None}
 
 
@@ -594,6 +605,45 @@ def _append(path: Path, row: dict) -> None:
 # --------------------------------------------------------------------------
 # 다수결, 사람이 볼 목록, 요약
 # --------------------------------------------------------------------------
+
+
+def _tag_num(tag: str) -> int:
+    digits = re.sub(r"\D", "", tag)
+    return int(digits) if digits else 0
+
+
+def ensure_blind_map(out_dir: Path, items: list[Item]) -> dict[str, str]:
+    """모든 건에 가린 번호를 붙여 blind_map.json에 저장하고 {key: 번호}를 돌려준다.
+
+    새 실행은 B001부터 (섞인 순서대로). 이미 있는 번호는 절대 바꾸지 않고, 번호가 없는 건에만 이어서 붙인다.
+    그래서 예전 실행의 #01 같은 번호도, 이어하기 뒤에도 같은 건은 같은 번호다.
+    """
+    path = out_dir / "blind_map.json"
+    mapping: dict[str, dict] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    by_key = {v["key"]: tag for tag, v in mapping.items()}
+    prefix = next(iter(mapping))[0] if mapping else "B"
+    width = max([len(re.sub(r"\D", "", t)) for t in mapping] + [0]) or 3
+    nxt = max([_tag_num(t) for t in mapping] + [0]) + 1
+    changed = not path.exists()
+    for it in items:
+        if it.key not in by_key:
+            tag = f"{prefix}{nxt:0{width}d}"
+            nxt += 1
+            mapping[tag] = {"key": it.key, "label": it.label, "id": it.qid, "repeat": it.repeat}
+            by_key[it.key] = tag
+            changed = True
+    if changed:
+        path.write_text(json.dumps(mapping, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {it.key: by_key[it.key] for it in items}
+
+
+def pending_counts(out_dir: Path, items: list[Item], names: list[str]) -> dict[str, int]:
+    """면접관마다 아직 판정이 없거나 판정불가인 건 수 (시작 예상 시간 계산용)."""
+    out: dict[str, int] = {}
+    for n in names:
+        rows = load_rows(out_dir / f"judge_{n}.jsonl")
+        out[n] = sum(1 for it in items if it.key not in rows or rows[it.key]["verdict"] == UNAVAILABLE)
+    return out
 
 
 def decide(verdicts: dict[str, str]) -> tuple[str, str]:
@@ -643,17 +693,14 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
             flagged.append((it, vs, reasons))
     (out_dir / "majority.jsonl").write_text("".join(json.dumps(m, ensure_ascii=False) + "\n" for m in maj), encoding="utf-8")
 
-    # 사람이 볼 목록: 어느 결과인지 가리고 번호만 붙인다 (순서는 seed로 섞음)
-    order = list(range(len(flagged)))
-    random.Random(seed + 2).shuffle(order)
-    blind_map: dict[str, dict] = {}
+    # 사람이 볼 목록: 어느 결과인지 가리고 번호만 붙인다 (번호는 blind_map.json에 한 번 정해지면 안 바뀐다)
+    ids = ensure_blind_map(out_dir, items)
+    flagged.sort(key=lambda f: _tag_num(ids[f[0].key]))
     lines = ["# 사람이 볼 목록", "", "어느 결과인지는 가렸습니다. 판정을 마친 뒤 `blind_map.json`으로 대응을 확인하세요.", ""]
     if not flagged:
         lines.append("(볼 건이 없습니다)")
-    for n, idx in enumerate(order, 1):
-        it, vs, reasons = flagged[idx]
-        tag = f"#{n:02d}"
-        blind_map[tag] = {"key": it.key, "label": it.label, "id": it.qid, "repeat": it.repeat}
+    for it, vs, reasons in flagged:
+        tag = ids[it.key]
         lines += [f"## {tag} ({it.qtype})", f"- 볼 이유: {', '.join(reasons)}", f"- 질문: {it.question}",
                   f"- must_include: {json.dumps(it.must_include, ensure_ascii=False)}", "- 답:", "", "```text", it.answer, "```", ""]
         for n_name in active:
@@ -664,14 +711,72 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
                 lines.append(f"- {n_name}: {UNAVAILABLE}")
         lines.append("")
     (out_dir / "review.md").write_text("\n".join(lines), encoding="utf-8")
-    (out_dir / "blind_map.json").write_text(json.dumps(blind_map, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    summary = _render_summary(items, judges, active, rows, maj, len(flagged), retries, bool(state.get("interrupted")))
+    # 결과 보기 화면: 라벨, key, 파일 이름은 넣지 않는다
+    flagged_info = {it.key: reasons for it, _vs, reasons in flagged}
+    maj_by_key = {m["key"]: m for m in maj}
+    records = []
+    for it in items:
+        m = maj_by_key[it.key]
+        judges_data = {}
+        for n_name in active:
+            r = rows[n_name].get(it.key)
+            judges_data[n_name] = (
+                {"verdict": r["verdict"], "cause": r.get("cause"), "reason": r.get("reason")} if r and r["verdict"] != UNAVAILABLE
+                else {"verdict": UNAVAILABLE, "cause": None, "reason": None}
+            )
+        records.append({
+            "bid": ids[it.key], "qid": it.qid, "repeat": it.repeat, "qtype": it.qtype, "question": it.question,
+            "must_include": it.must_include, "expected_sources": it.expected_sources,
+            "retrieved_sources": it.retrieved_sources, "answer": it.answer, "judges": judges_data,
+            "majority": m["majority"], "note": m["note"], "auto_correct": it.auto_correct, "correct": it.correct,
+            "final_source": "none" if it.correct is None else ("manual" if it.manual_correct is not None else "auto"),
+            "review": m["review"], "reasons": flagged_info.get(it.key, []),
+        })
+    write_review_html(out_dir, out_dir.name, seed, records, list(active))
+
+    summary = _render_summary(items, judges, active, rows, maj, len(flagged), retries, bool(state.get("interrupted")),
+                              load_human(out_dir), load_criteria(out_dir))
     (out_dir / "summary.md").write_text(summary, encoding="utf-8")
     return summary
 
 
-def _render_summary(items, judges, active, rows, maj, review_count, retries, interrupted: bool = False) -> str:
+def _repeat_table(items, active, rows, maj) -> list[str]:
+    """회차별로 최종 판정(correct)과의 일치율. 괄호는 최종 합격 건 / 최종 불합격 건에서의 일치."""
+    def pct(a: int, b: int) -> str:
+        return "-" if b == 0 else f"{a}/{b} ({a / b:.0%})"
+
+    maj_by_key = {m["key"]: m["majority"] for m in maj}
+    who_list = list(active) + ["다수결"]
+    out = ["## 회차별 일치율", "",
+           "최종 판정(correct)과 일치한 비율. 괄호는 (최종 합격 건 / 최종 불합격 건)에서의 일치. 보류와 판정 불가는 분모에서 뺍니다.", "",
+           "| 회차 | " + " | ".join(who_list) + " |", "|---" * (len(who_list) + 1) + "|"]
+    for rep_no in sorted({it.repeat for it in items}):
+        cells = []
+        for who in who_list:
+            total = agree = 0
+            by = {True: [0, 0], False: [0, 0]}
+            for it in items:
+                if it.repeat != rep_no or it.correct is None:
+                    continue
+                if who == "다수결":
+                    v = maj_by_key.get(it.key)
+                else:
+                    r = rows[who].get(it.key)
+                    v = r["verdict"] if r else None
+                if v not in ("합격", "불합격"):
+                    continue
+                hit = (v == "합격") == it.correct
+                total += 1
+                agree += hit
+                by[bool(it.correct)][0] += hit
+                by[bool(it.correct)][1] += 1
+            cells.append(f"{pct(agree, total)} ({pct(*by[True])} / {pct(*by[False])})")
+        out.append(f"| {rep_no}회차 | " + " | ".join(cells) + " |")
+    return out
+
+
+def _render_summary(items, judges, active, rows, maj, review_count, retries, interrupted: bool = False, human: dict | None = None, criteria: dict | None = None) -> str:
     def pct(a: int, b: int) -> str:
         return "-" if b == 0 else f"{a}/{b} ({a / b:.0%})"
 
@@ -718,7 +823,9 @@ def _render_summary(items, judges, active, rows, maj, review_count, retries, int
             ag += hit
             maj_truth[bool(it.correct)][0] += hit
             maj_truth[bool(it.correct)][1] += 1
-    out += ["", f"- 다수결과 correct의 일치: {pct(ag, tot)} (최종 합격 건 {pct(*maj_truth[True])}, 최종 불합격 건 {pct(*maj_truth[False])})", "", "## 면접관끼리 일치율", ""]
+    out += ["", f"- 다수결과 correct의 일치: {pct(ag, tot)} (최종 합격 건 {pct(*maj_truth[True])}, 최종 불합격 건 {pct(*maj_truth[False])})", ""]
+    out += _repeat_table(items, active, rows, maj)
+    out += ["", "## 면접관끼리 일치율", ""]
     names = list(active)
     pairs = [(a, b) for i, a in enumerate(names) for b in names[i + 1:]]
     if not pairs:
@@ -736,6 +843,8 @@ def _render_summary(items, judges, active, rows, maj, review_count, retries, int
         known = [t for t in toks if isinstance(t, int)]
         out += ["", "## Codex 사용 토큰", "", f"- 합계: {sum(known) if known else 'null (토큰을 읽지 못함)'}",
                 f"- 토큰을 읽은 건 / 호출한 건: {len(known)}/{len(toks)}"]
+    out += human_section(human or {}, rows, maj, list(active), pct)
+    out += criteria_section(criteria or {})
     out.append("")
     return "\n".join(out)
 
@@ -756,6 +865,7 @@ def execute(
     now: Callable[[], datetime] = datetime.now,
     secrets: tuple = (),
     stop: threading.Event | None = None,
+    progress=None,
 ) -> str:
     """면접관마다 스레드 하나로 돌리고 마지막에 결과 파일을 쓴다. summary 본문을 돌려준다."""
     stop = stop if stop is not None else threading.Event()
@@ -786,8 +896,12 @@ def execute(
                 chosen = pick_model(spec, log=log, sleep=sleep)
             info: dict = dict(chosen)
             if chosen["status"] == "active":
+                if progress:
+                    done = {k: r["verdict"] for k, r in load_rows(out_dir / f"judge_{spec.name}.jsonl").items() if r["verdict"] != UNAVAILABLE}
+                    progress.judge_ready(spec.name, done)
                 judge = spec.make(chosen["model"])
-                res = run_judge(judge, items, out_dir / f"judge_{spec.name}.jsonl", log=log, sleep=sleep, stop=stop)
+                res = run_judge(judge, items, out_dir / f"judge_{spec.name}.jsonl", log=log, sleep=sleep, stop=stop,
+                                 on_row=(lambda row, n=spec.name: progress.on_row(n, row)) if progress else None)
                 if res["stopped"]:
                     info["status"], info["stopped"] = "stopped", res["stopped"]
         except Interrupted:  # 시작 확인 중 중단: 이어하기에서 모델을 다시 고른다
@@ -796,6 +910,8 @@ def execute(
             info = {"status": "skipped", "model": None, "reason": redact(f"예기치 못한 오류 {type(exc).__name__}", *secrets)}
         with lock:
             state["judges"][spec.name] = info
+        if progress and info["status"] != "active":
+            progress.judge_out(spec.name)  # 건너뛰었거나 멈춘 면접관은 빼고 건 완료를 센다
 
     # 데몬 스레드 + 짧은 join: 윈도우에서 인자 없는 join()은 Ctrl+C를 받지 못해 셸을 닫아야 했다.
     threads = [threading.Thread(target=worker, args=(s,), daemon=True) for s in specs]
@@ -805,6 +921,8 @@ def execute(
         while any(t.is_alive() for t in threads):
             for t in threads:
                 t.join(0.2)
+            if progress:
+                progress.tick()
     except KeyboardInterrupt:
         stop.set()
         deadline = time.monotonic() + STOP_GRACE_SECONDS
@@ -820,6 +938,10 @@ def execute(
             state["judges"].setdefault(spec.name, {"status": "skipped", "model": None, "reason": STOP_MESSAGE})
     else:
         state.pop("interrupted", None)
+    # 스레드가 끝난 순서가 아니라 지정한 면접관 순서로 고정 (요약, 화면의 열 순서가 매번 같게)
+    order = [sp.name for sp in specs]
+    state["judges"] = {n: state["judges"][n] for n in order if n in state["judges"]} | {
+        n: v for n, v in state["judges"].items() if n not in order}
     state["items"] = [it.key for it in items]
     run_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     return finalize(out_dir, items, state, seed, log.count)

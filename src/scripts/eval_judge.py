@@ -9,7 +9,17 @@
     # 판정 불가 건만 같은 모델로 다시
     python -m src.scripts.eval_judge --resume data/eval/judge/<실행폴더>
 
+    # 진행 줄에서 판정과 (갈림)을 숨기고 진행 수와 예상 시간만
+    python -m src.scripts.eval_judge ... --blind
+
+    # 판정 호출 없이 review.md, review.html, summary.md 다시 만들기
+    python -m src.scripts.eval_judge --rebuild data/eval/judge/<실행폴더>
+
+    # review.html에서 내보낸 내 판정을 실행 폴더의 human.jsonl에 합치기
+    python -m src.scripts.eval_judge --import-human data/eval/judge/<실행폴더> human-<실행폴더>.json
+
 금고 암호는 gemini를 쓸 때 시작에 한 번 터미널에서 직접 친다.
+codex, gemini는 mala_eval_docs 컬렉션 결과에만 쓴다 (그 밖이거나 알 수 없으면 거부) (judge_guard).
 """
 
 from __future__ import annotations
@@ -32,10 +42,16 @@ from src.eval.judge import (
     JudgeSpec,
     RateLimiter,
     build_items,
+    ensure_blind_map,
     execute,
+    finalize,
+    pending_counts,
     select_items,
     shuffle_items,
 )
+from src.eval.judge_guard import check_external_judges
+from src.eval.judge_human import HumanImportError, import_human
+from src.eval.judge_progress import Progress, load_history
 from src.eval.runner import load_questions
 from src.keystore import GEMINI_ENTRY, KeystoreError, check_gemini_key_shape, get_secret, redact
 from src.scripts.eval_rescore import load_records
@@ -114,6 +130,25 @@ def _build_specs(names: list[str], workdir: Path, gemini_rpm: float | None):
     return specs, secrets
 
 
+def load_folder(out_dir: Path):
+    """실행 폴더에서 (items, state, meta)를 다시 만든다. 판정 호출은 하지 않는다."""
+    meta = json.loads((out_dir / "inputs.json").read_text(encoding="utf-8"))
+    state = json.loads((out_dir / "run.json").read_text(encoding="utf-8"))
+    questions = load_questions(meta["questions"])
+    items = build_items([r for f in meta["files"] for r in load_records(f)], questions)
+    keep = set(state["items"])
+    items = shuffle_items([it for it in items if it.key in keep], meta["seed"])
+    return items, state, meta
+
+
+def rebuild(out_dir: Path) -> str:
+    """판정 파일에서 majority, review.md, review.html, summary.md를 다시 쓴다. 기존 번호는 그대로 둔다."""
+    items, state, meta = load_folder(out_dir)
+    retries_log = out_dir / "retries.log"
+    retries = len(retries_log.read_text(encoding="utf-8").splitlines()) if retries_log.exists() else 0
+    return finalize(out_dir, items, state, meta["seed"], retries)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="면접관 3명으로 평가 결과를 판정한다.")
     ap.add_argument("files", nargs="*", help="_rescored-v2.jsonl 파일들 (--resume이면 생략)")
@@ -124,7 +159,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--resume", default=None, help="이전 실행 폴더. 판정 불가 건만 같은 모델로 다시 돈다")
     ap.add_argument("--gemini-rpm", type=float, default=None, help="Gemini 분당 요청 수 상한 (기본: .env GEMINI_JUDGE_RPM, 없으면 4. 0이면 제한 없음)")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--blind", action="store_true", help="진행 줄에서 판정과 (갈림)을 숨기고 진행 수와 예상 시간만 보여 준다")
+    ap.add_argument("--rebuild", default=None, metavar="실행폴더", help="판정 호출 없이 review.md, review.html, summary.md를 다시 만든다")
+    ap.add_argument("--import-human", nargs=2, default=None, metavar=("실행폴더", "내보낸.json"),
+                    help="review.html에서 내보낸 내 판정을 human.jsonl에 합치고 요약을 다시 만든다")
     args = ap.parse_args(argv)
+
+    if args.rebuild or args.import_human:  # 면접관을 부르지 않는 작업: 작업 폴더, 키가 필요 없다
+        try:
+            if args.import_human:
+                folder, export = Path(args.import_human[0]), args.import_human[1]
+                count = import_human(folder, export)
+                print(f"사람 판정 {count}건을 합쳤습니다.")
+            else:
+                folder = Path(args.rebuild)
+            rebuild(folder)
+            print(f"다시 만들었습니다: {folder / 'summary.md'}, {folder / 'review.html'}")
+            return 0
+        except HumanImportError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            return 1
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"오류: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
 
     load_dotenv(_ROOT / ".env")
     workdir = resolve_workdir(os.environ.get("JUDGE_WORKDIR"))  # 아무것도 만들기 전에 확인
@@ -156,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
             print("판정할 건이 없습니다.", file=sys.stderr)
             return 1
 
+        # 안전장치: 키를 꺼내거나 폴더를 만들기 전에 입력의 출처를 본다
+        check_external_judges(list(files), names, _ROOT)
+
         out_dir.mkdir(parents=True, exist_ok=True)
         if not args.resume:
             (out_dir / "inputs.json").write_text(
@@ -166,12 +226,20 @@ def main(argv: list[str] | None = None) -> int:
         specs, secrets = _build_specs(names, workdir, resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM")))
         print(f"대상 {len(items)}건, 면접관 {', '.join(names)}, 결과 폴더 {out_dir}", flush=True)
         stop = threading.Event()
-        summary = execute(specs, items, out_dir, seed=seed, resume=bool(args.resume), secrets=tuple(secrets), stop=stop)
+        ids = ensure_blind_map(out_dir, items)
+        gemini_rpm = resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM"))
+        progress = Progress(
+            items, ids, names, blind=args.blind,
+            expect=load_history(JUDGE_DIR, out_dir, names),
+            min_sec={"gemini": 60.0 / gemini_rpm} if gemini_rpm else None,
+        )
+        print(progress.start_line(pending_counts(out_dir, items, names)), flush=True)
+        summary = execute(specs, items, out_dir, seed=seed, resume=bool(args.resume), secrets=tuple(secrets), stop=stop, progress=progress)
         print(summary)
         if stop.is_set():
             print(f"\n중단했습니다. 판정한 건은 저장했습니다. 이어서 돌리려면:\n  python -m src.scripts.eval_judge --resume {out_dir}")
             return 130
-        print(f"\n사람이 볼 목록: {out_dir / 'review.md'}")
+        print(f"\n사람이 볼 목록: {out_dir / 'review.md'}\n결과 보기 화면: {out_dir / 'review.html'}")
         return 0
     except Exception as exc:  # 어떤 오류든 키가 섞여 나가지 않게 한 번 더 거른다
         print(f"오류: {redact(f'{type(exc).__name__}: {exc}', *secrets)}", file=sys.stderr)

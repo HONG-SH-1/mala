@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__SCRIPT_HASH__'; style-src 'sha256-__STYLE_HASH__'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>면접관 결과 보기</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6a6a64; --line: #d9d9d2;
+  --accent: #1f5fbf; --pass: #1a7f45; --fail: #b3261e; --hold: #8a6100; --warn-bg: #fff4d6; --chip: #e8eefb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a; --panel: #222427; --text: #ececea; --muted: #a2a29a; --line: #3a3d41;
+    --accent: #7aa7ff; --pass: #5ccf8b; --fail: #ff8a80; --hold: #e6b84a; --warn-bg: #3a3118; --chip: #2b3550;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, "Malgun Gothic", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+h1 { font-size: 16px; margin: 0 0 6px; }
+h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent); }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+button, select, input[type="text"] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+button { cursor: pointer; }
+button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card, details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; }
+.card { padding: 14px 16px; }
+details > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
+details > .inner { padding: 0 14px 12px; }
+details details { margin: 8px 0 0; background: transparent; }
+.sec { margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.muted { color: var(--muted); font-size: 13px; }
+.help { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.badge { display: inline-block; font-size: 12px; font-weight: 600; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; margin-left: 6px; }
+.badge.need { background: var(--warn-bg); }
+.pass { color: var(--pass); } .fail { color: var(--fail); } .hold { color: var(--hold); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--chip); border-radius: 12px; padding: 1px 10px; font-weight: 600; }
+.src-ok { color: var(--pass); font-weight: 600; }
+ul.plain { margin: 4px 0 0; padding-left: 20px; }
+pre.answer, pre.excerpt { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0; font: inherit; }
+pre.excerpt { font-size: 13px; }
+.md { margin: 8px 0; }
+.md-p, .md-li { white-space: pre-wrap; word-break: break-word; }
+.md-li { display: flex; gap: 6px; }
+.md-li .mk { flex: none; min-width: 1.2em; color: var(--muted); }
+.md-gap { height: 0.6em; }
+.md code, pre.md-code { font: 13px/1.5 ui-monospace, Consolas, monospace; background: var(--bg); border-radius: 4px; padding: 0 4px; }
+pre.md-code { white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); padding: 8px 10px; margin: 6px 0; }
+.d1 { margin-left: 1.2em; } .d2 { margin-left: 2.4em; } .d3 { margin-left: 3.6em; }
+.judge { display: grid; grid-template-columns: 90px 70px 1fr; gap: 4px 10px; padding: 4px 0; border-top: 1px dashed var(--line); }
+.verdicts label { margin-right: 14px; }
+.form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.form-row input[type="text"] { flex: 1 1 280px; }
+textarea { width: 100%; min-height: 90px; font: 12px/1.4 ui-monospace, Consolas, monospace; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.locked { background: var(--warn-bg); border-radius: 6px; padding: 8px 12px; }
+.crit { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.rubric h4 { margin: 10px 0 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>면접관 결과 보기 <span class="muted" id="runname"></span></h1>
+  <div class="bar" id="topbar"></div>
+</header>
+<main id="app"></main>
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("data").textContent);
+  var ITEMS = {};
+  DATA.items.forEach(function (it) { ITEMS[it.bid] = it; });
+  var KEY = "mala-review:" + DATA.run;
+  var VERDICTS = ["합격", "불합격", "보류"];
+  var S = { mode: "mine", filter: "all", judge: "", hide: true, pos: 0, mine: {}, crit: {}, showRubric: false, exportText: "" };
+
+  /* MD-BEGIN */
+  var MD_INLINE = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+  function mdInline(s) {
+    var out = [], pos = 0, m;
+    MD_INLINE.lastIndex = 0;
+    while ((m = MD_INLINE.exec(s)) !== null) {
+      if (m.index > pos) out.push(["t", s.slice(pos, m.index)]);
+      out.push(m[1] !== undefined ? ["b", m[1]] : ["c", m[2]]);
+      pos = m.index + m[0].length;
+    }
+    if (pos < s.length) out.push(["t", s.slice(pos)]);
+    return out;
+  }
+  function mdParse(text) {
+    var lines = text.split(/\r\n|\r|\n/), blocks = [], i = 0;
+    while (i < lines.length) {
+      var raw = lines[i];
+      if (/^[ \t]*```/.test(raw)) {
+        i++;
+        var code = [];
+        while (i < lines.length && !/^[ \t]*```[ \t]*$/.test(lines[i])) { code.push(lines[i]); i++; }
+        i++;
+        blocks.push({ t: "code", x: code.join("\n") });
+        continue;
+      }
+      i++;
+      if (/^[ \t]*$/.test(raw)) {
+        if (blocks.length && blocks[blocks.length - 1].t !== "gap") blocks.push({ t: "gap" });
+        continue;
+      }
+      var line = raw.split("\t").join("    ").replace(/[ \t]+$/, "");
+      var m = /^( *)([-*+]|[0-9]+[.)]) +([^\n]*)$/.exec(line);
+      if (m) {
+        blocks.push({ t: "li", d: Math.min(3, Math.floor(m[1].length / 2)), m: m[2].length === 1 ? "•" : m[2], c: mdInline(m[3]) });
+        continue;
+      }
+      var p = /^( *)([^\n]*)$/.exec(line);
+      blocks.push({ t: "p", d: Math.min(3, Math.floor(p[1].length / 2)), c: mdInline(p[2]) });
+    }
+    while (blocks.length && blocks[blocks.length - 1].t === "gap") blocks.pop();
+    return blocks;
+  }
+  /* MD-END */
+
+  /* BLIND-BEGIN */
+  function decideBlind(prev, verdict, visibleNow) {
+    if (prev && prev.blind === true && prev.verdict === verdict) return true;
+    return !visibleNow;
+  }
+  /* BLIND-END */
+
+  function load() {
+    try {
+      var raw = window.localStorage.getItem(KEY);
+      if (!raw) return;
+      var o = JSON.parse(raw);
+      if (o && o.mine && typeof o.mine === "object") {
+        Object.keys(o.mine).forEach(function (bid) {
+          var m = o.mine[bid];
+          if (ITEMS[bid] && m && VERDICTS.indexOf(m.verdict) >= 0 && typeof m.reason === "string") {
+            // blind 필드가 없는 예전 저장분은 블라인드가 아닌 것으로 본다 (안전한 쪽)
+            S.mine[bid] = { verdict: m.verdict, reason: m.reason.slice(0, 500), at: String(m.at || ""), blind: m.blind === true };
+          }
+        });
+      }
+      if (o && o.crit && typeof o.crit === "object") {
+        Object.keys(o.crit).forEach(function (bid) {
+          var c = o.crit[bid];
+          if (ITEMS[bid] && c && typeof c.odd === "boolean" && typeof c.note === "string") {
+            S.crit[bid] = { odd: c.odd, note: c.note.slice(0, 500), at: String(c.at || "") };
+          }
+        });
+      }
+      if (o && (o.mode === "mine" || o.mode === "view")) S.mode = o.mode;
+      if (o && typeof o.hide === "boolean") S.hide = o.hide;
+      if (o && Number.isInteger(o.pos) && o.pos >= 0 && o.pos < Math.max(1, DATA.queue.length)) S.pos = o.pos;
+    } catch (e) { /* 저장소를 못 쓰면 저장 없이 동작 */ }
+  }
+  function save() {
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify({ mine: S.mine, crit: S.crit, mode: S.mode, hide: S.hide, pos: S.pos }));
+    } catch (e) { /* 무시 */ }
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  function vcls(v) { return v === "합격" ? "pass" : v === "불합격" ? "fail" : "hold"; }
+  function finalText(c) { return c === true ? "합격" : c === false ? "불합격" : "-"; }
+  function revealed(it) { return !it.review || !S.hide || !!S.mine[it.bid]; }
+  function isSplit(it) {
+    var vs = DATA.judges.map(function (j) { return it.judges[j] ? it.judges[j].verdict : null; });
+    return vs.indexOf("합격") >= 0 && vs.indexOf("불합격") >= 0;
+  }
+  function differsFromFinal(v, c) { return (v === "합격" || v === "불합격") && c !== null && ((v === "합격") !== c); }
+
+  function passes(it) {
+    if (S.filter === "review") return !!it.review;
+    // 내 판정 전의 건에는 갈림, 최종과 다름, 면접관 필터를 적용하지 않는다 (필터 결과가 힌트가 되므로)
+    if (!revealed(it)) return true;
+    if (S.filter === "split" && !isSplit(it)) return false;
+    if (S.filter === "differ" && !differsFromFinal(it.majority, it.correct)) return false;
+    if (S.judge) {
+      var jr = it.judges[S.judge];
+      if (!jr || !differsFromFinal(jr.verdict, it.correct)) return false;
+    }
+    return true;
+  }
+
+  // ---- 마크다운 그리기: createElement와 textContent만 쓴다 ----
+  function renderInline(parent, segs) {
+    segs.forEach(function (sg) {
+      var tag = sg[0] === "b" ? "strong" : sg[0] === "c" ? "code" : "span";
+      parent.appendChild(el(tag, "", sg[1]));
+    });
+  }
+  function renderMarkdown(text) {
+    var box = el("div", "md");
+    mdParse(text).forEach(function (b) {
+      if (b.t === "gap") { box.appendChild(el("div", "md-gap")); return; }
+      if (b.t === "code") { box.appendChild(el("pre", "md-code", b.x)); return; }
+      var row = el("div", (b.t === "li" ? "md-li" : "md-p") + (b.d ? " d" + b.d : ""));
+      if (b.t === "li") {
+        row.appendChild(el("span", "mk", b.m));
+        var body = el("div", "md-p");
+        renderInline(body, b.c);
+        row.appendChild(body);
+      } else {
+        renderInline(row, b.c);
+      }
+      box.appendChild(row);
+    });
+    return box;
+  }
+
+  // ---- 한 건 화면의 칸들 ----
+  function section(title, node) {
+    var s = el("div", "sec");
+    s.appendChild(el("h3", "", title));
+    s.appendChild(node);
+    return s;
+  }
+  function typeText(t) {
+    if (t === "in_notes") return "문서에 답이 있음. 아래 핵심어가 답에 들어가야 합격";
+    if (t === "not_in_notes") return "문서에 답이 없음. 없다고 말하고 지어내지 않아야 합격";
+    return String(t);
+  }
+  function chipsNode(list) {
+    if (!list || !list.length) return el("div", "muted", "없음(위 유형 설명 참고)");
+    var box = el("div", "chips");
+    list.forEach(function (k) {
+      box.appendChild(el("span", "chip", Array.isArray(k) ? k.join(" 또는 ") : k));
+    });
+    return box;
+  }
+  function excerptNode(it) {
+    var box = el("div");
+    var list = it.expected_sources || [];
+    if (!list.length) { box.appendChild(el("div", "muted", "기록 없음")); return box; }
+    var ex = (DATA.excerpts && DATA.excerpts[it.qid]) || {};
+    list.forEach(function (src) {
+      var d = el("details");
+      d.appendChild(el("summary", "", src));
+      var inner = el("div", "inner");
+      var e = ex[src];
+      if (e) {
+        inner.appendChild(el("div", "muted", DATA.corpus + " 사본의 해당 부분 (" + e.from + "~" + e.to + "줄 / 전체 " + e.total + "줄)"));
+        inner.appendChild(el("pre", "excerpt", e.text));
+      } else {
+        inner.appendChild(el("div", "muted", "사본에서 이 파일을 찾지 못했습니다."));
+      }
+      d.appendChild(inner);
+      box.appendChild(d);
+    });
+    return box;
+  }
+  function answerNode(it) {
+    var box = el("div");
+    var toggle = el("button", "", "원문 보기");
+    toggle.type = "button";
+    var body = el("div");
+    var rawMode = false;
+    function draw() {
+      clear(body);
+      if (rawMode) body.appendChild(el("pre", "answer", it.answer));
+      else body.appendChild(renderMarkdown(it.answer));
+      toggle.textContent = rawMode ? "읽기 좋게 보기" : "원문 보기";
+    }
+    toggle.addEventListener("click", function () { rawMode = !rawMode; draw(); });
+    box.appendChild(toggle);
+    box.appendChild(body);
+    draw();
+    return box;
+  }
+  function retrievedNode(it) {
+    var list = it.retrieved_sources || [];
+    if (!list.length) return el("div", "muted", "기록 없음");
+    var ul = el("ul", "plain");
+    var expected = it.expected_sources || [];
+    list.forEach(function (src) {
+      var li = el("li", "", src);
+      if (expected.indexOf(src) >= 0) li.appendChild(el("span", "src-ok", "  ✓ 근거 문서에 포함"));
+      ul.appendChild(li);
+    });
+    return ul;
+  }
+  function itemBody(it) {
+    var box = el("div");
+    box.appendChild(el("div", "muted", it.qid + " · " + it.repeat + "회차 · 번호 " + it.bid));
+    box.appendChild(section("질문", el("div", "", it.question)));
+    box.appendChild(section("문항 유형", el("div", "", typeText(it.qtype))));
+    box.appendChild(section("정답 조건", chipsNode(it.must_include)));
+    box.appendChild(section("근거 문서", excerptNode(it)));
+    box.appendChild(section("MALA의 답 (평가 대상)", answerNode(it)));
+    box.appendChild(section("MALA가 찾아온 출처", retrievedNode(it)));
+    return box;
+  }
+
+  function finalSourceText(it) {
+    if (it.final_source === "manual") return "사람이 고침 (manual.yaml)";
+    if (it.final_source === "auto") return "키워드 자동 판정";
+    return "기록 없음";
+  }
+  function detailNode(it) {
+    var box = el("div", "sec");
+    box.appendChild(el("h3", "", "AI 면접관 판정과 최종 판정"));
+    if (!revealed(it)) {
+      box.appendChild(el("div", "locked", "내 판정을 저장하면 면접관 판정과 최종 판정이 보입니다."));
+      return box;
+    }
+    DATA.judges.forEach(function (j) {
+      var r = it.judges[j];
+      var row = el("div", "judge");
+      row.appendChild(el("strong", "", j));
+      row.appendChild(el("span", r ? vcls(r.verdict) : "muted", r ? r.verdict : "-"));
+      row.appendChild(el("span", "", r ? ((r.cause ? "[" + r.cause + "] " : "") + (r.reason || "")) : "판정 없음"));
+      box.appendChild(row);
+    });
+    var sum = el("div", "judge");
+    sum.appendChild(el("strong", "", "다수결"));
+    sum.appendChild(el("span", vcls(it.majority), it.majority));
+    sum.appendChild(el("span", "muted", it.note || ""));
+    box.appendChild(sum);
+    var fin = el("div", "judge");
+    fin.appendChild(el("strong", "", "최종 판정"));
+    fin.appendChild(el("span", vcls(finalText(it.correct)), finalText(it.correct)));
+    var fromText = "출처: " + finalSourceText(it);
+    if (it.final_source === "manual") fromText += " · 키워드 자동 판정은 " + (it.auto_correct === null ? "-" : it.auto_correct ? "합격" : "불합격");
+    fin.appendChild(el("span", "muted", fromText));
+    box.appendChild(fin);
+    if (it.reasons && it.reasons.length) box.appendChild(el("div", "muted", "볼 이유: " + it.reasons.join(", ")));
+    return box;
+  }
+
+  function mineCount() { return DATA.queue.filter(function (b) { return S.mine[b]; }).length; }
+
+  // ---- 상단 ----
+  function renderTop() {
+    var bar = document.getElementById("topbar");
+    clear(bar);
+    document.getElementById("runname").textContent = DATA.run;
+    [["mine", "내 판정 모드"], ["view", "보기 모드"]].forEach(function (m) {
+      var b = el("button", S.mode === m[0] ? "on" : "", m[1]);
+      b.type = "button";
+      b.addEventListener("click", function () { S.mode = m[0]; save(); render(); });
+      bar.appendChild(b);
+    });
+    var rb = el("button", S.showRubric ? "on" : "", "판정 기준");
+    rb.type = "button";
+    rb.addEventListener("click", function () { S.showRubric = !S.showRubric; render(); });
+    bar.appendChild(rb);
+    bar.appendChild(el("span", "muted", "내 판정 " + mineCount() + "/" + DATA.queue.length));
+    var lab = el("label", "muted");
+    lab.htmlFor = "opt-hide";
+    var cb = document.createElement("input");
+    cb.type = "checkbox"; cb.id = "opt-hide"; cb.name = "opt_hide"; cb.checked = S.hide;
+    cb.addEventListener("change", function () { S.hide = cb.checked; save(); render(); });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(" 내 판정 전에는 숨김"));
+    bar.appendChild(lab);
+    var ex = el("button", "", "내보내기");
+    ex.type = "button";
+    ex.addEventListener("click", doExport);
+    bar.appendChild(ex);
+  }
+
+  function rubricNode() {
+    var card = el("div", "card rubric");
+    card.appendChild(el("h3", "", "판정 기준"));
+    DATA.rubric.forEach(function (sec) {
+      card.appendChild(el("h4", "", sec.title));
+      var ul = el("ul", "plain");
+      sec.lines.forEach(function (ln) { ul.appendChild(el("li", "", ln)); });
+      card.appendChild(ul);
+    });
+    return card;
+  }
+
+  // ---- 내 판정 모드: 한 건씩 ----
+  function critBox(bid) {
+    var saved = S.crit[bid];
+    var box = el("div", "crit");
+    box.appendChild(el("h3", "", "기준 의견 (판정과 따로, 선택)"));
+    box.appendChild(el("div", "help", "이 문제의 정답 기준 자체가 이상하면 여기에 적어 주세요. 위의 합격/불합격 판정에는 영향을 주지 않고, 나중에 기준(v3)을 고칠 때 참고합니다."));
+    var row = el("div", "form-row");
+    var l = el("label");
+    l.htmlFor = "crit-odd";
+    var odd = document.createElement("input");
+    odd.type = "checkbox"; odd.id = "crit-odd"; odd.name = "crit_odd"; odd.checked = !!(saved && saved.odd);
+    l.appendChild(odd);
+    l.appendChild(document.createTextNode(" 이 기준이 이상함"));
+    row.appendChild(l);
+    var note = document.createElement("input");
+    note.type = "text"; note.id = "crit-note"; note.name = "crit_note"; note.maxLength = 200;
+    note.placeholder = "한 줄 메모 (선택)";
+    note.value = saved ? saved.note : "";
+    row.appendChild(note);
+    var msg = el("span", "muted", saved ? "저장됨" : "");
+    var btn = el("button", "", "기준 의견 저장");
+    btn.type = "button";
+    btn.addEventListener("click", function () {
+      var text = note.value.trim();
+      if (!odd.checked && !text) { delete S.crit[bid]; msg.textContent = "비워서 지웠습니다."; }
+      else { S.crit[bid] = { odd: odd.checked, note: text, at: new Date().toISOString() }; msg.textContent = "저장됨"; }
+      save();
+    });
+    row.appendChild(btn);
+    row.appendChild(msg);
+    box.appendChild(row);
+    return box;
+  }
+
+  function renderMine(app) {
+    if (!DATA.queue.length) { app.appendChild(el("div", "card", "사람이 볼 건이 없습니다.")); return; }
+    app.appendChild(el("p", "help", "MALA(문서를 찾아 답하는 비서)의 답을 보고 합격 / 불합격 / 보류를 정해 주세요. 저장하면 AI 면접관 세 명의 판정과 최종 판정이 보입니다. 위 \"판정 기준\" 버튼에 채점 규칙이 있습니다."));
+    var bid = DATA.queue[S.pos];
+    var it = ITEMS[bid];
+    var card = el("div", "card");
+    card.appendChild(el("div", "muted", "차례 " + (S.pos + 1) + " / " + DATA.queue.length));
+    card.appendChild(itemBody(it));
+
+    var saved = S.mine[bid];
+    var form = el("div", "sec");
+    form.appendChild(el("h3", "", "내 판정"));
+    var radios = el("div", "verdicts");
+    var chosen = saved ? saved.verdict : "";
+    VERDICTS.forEach(function (v, idx) {
+      var l = el("label");
+      l.htmlFor = "verdict-" + idx;
+      var r = document.createElement("input");
+      r.type = "radio"; r.id = "verdict-" + idx; r.name = "verdict"; r.value = v; r.checked = chosen === v;
+      r.addEventListener("change", function () { chosen = v; });
+      l.appendChild(r);
+      l.appendChild(document.createTextNode(" " + v));
+      radios.appendChild(l);
+    });
+    form.appendChild(radios);
+    if (saved && saved.blind === true) {
+      form.appendChild(el("div", "help", "블라인드로 저장한 판정입니다. 판정(합격/불합격/보류)을 그대로 두고 이유 글만 고치면 블라인드 판정으로 남고, 판정을 바꾸면 \"임원 판정\"으로 셉니다."));
+    } else if (revealed(it)) {
+      form.appendChild(el("div", "locked", "지금은 면접관 판정이 보이는 상태입니다. 이 상태에서 저장하면 블라인드 판정으로 기록되지 않고, 일치율에서 빠져 \"임원 판정\"으로 따로 셉니다."));
+    }
+    var row = el("div", "form-row");
+    var reason = document.createElement("input");
+    reason.type = "text"; reason.id = "my-reason"; reason.name = "my_reason"; reason.maxLength = 200;
+    reason.placeholder = "한 줄 이유 (필수)";
+    reason.value = saved ? saved.reason : "";
+    row.appendChild(reason);
+    var msg = el("span", "muted", saved ? "저장됨 (" + (saved.blind ? "블라인드 판정" : "면접관 판정을 본 뒤 판정") + ")" : "");
+    var saveBtn = el("button", "on", "저장");
+    saveBtn.type = "button";
+    saveBtn.addEventListener("click", function () {
+      var text = reason.value.trim();
+      if (VERDICTS.indexOf(chosen) < 0 || !text) { msg.textContent = "판정과 한 줄 이유를 모두 입력하세요."; return; }
+      // 저장하는 순간 면접관 판정이 가려져 있었는지(blind)를 같이 기록한다. 이미 보이는 상태면 false.
+      // 이미 블라인드로 저장한 건은 판정이 그대로면 blind를 유지하고(이유 글만 고친 경우), 판정이 바뀌면 false.
+      S.mine[bid] = { verdict: chosen, reason: text, at: new Date().toISOString(), blind: decideBlind(S.mine[bid], chosen, revealed(it)) };
+      save(); render();
+    });
+    row.appendChild(saveBtn);
+    row.appendChild(msg);
+    form.appendChild(row);
+    card.appendChild(form);
+    card.appendChild(critBox(bid));
+    card.appendChild(detailNode(it));
+
+    var nav = el("div", "form-row");
+    var prev = el("button", "", "이전");
+    prev.type = "button";
+    prev.disabled = S.pos === 0;
+    prev.addEventListener("click", function () { S.pos -= 1; save(); render(); });
+    var next = el("button", "", "다음");
+    next.type = "button";
+    next.disabled = S.pos >= DATA.queue.length - 1;
+    next.addEventListener("click", function () { S.pos += 1; save(); render(); });
+    var nextTodo = el("button", "", "다음 미판정");
+    nextTodo.type = "button";
+    nextTodo.addEventListener("click", function () {
+      for (var k = 1; k <= DATA.queue.length; k++) {
+        var p = (S.pos + k) % DATA.queue.length;
+        if (!S.mine[DATA.queue[p]]) { S.pos = p; save(); render(); return; }
+      }
+      msg.textContent = "모두 판정했습니다. 내보내기를 누르세요.";
+    });
+    [prev, next, nextTodo].forEach(function (b) { nav.appendChild(b); });
+    card.appendChild(nav);
+    app.appendChild(card);
+  }
+
+  // ---- 보기 모드: 질문, 회차로 묶음 ----
+  function renderView(app) {
+    var bar = el("div", "card");
+    var row = el("div", "bar");
+    [["all", "전체"], ["review", "사람이 볼 건"], ["split", "의견이 갈린 건"], ["differ", "최종과 다른 건"]].forEach(function (f) {
+      var b = el("button", S.filter === f[0] ? "on" : "", f[1]);
+      b.type = "button";
+      b.addEventListener("click", function () { S.filter = f[0]; render(); });
+      row.appendChild(b);
+    });
+    var sel = document.createElement("select");
+    sel.id = "filter-judge"; sel.name = "filter_judge";
+    var o0 = el("option", "", "면접관: 전체");
+    o0.value = "";
+    sel.appendChild(o0);
+    DATA.judges.forEach(function (j) {
+      var o = el("option", "", "면접관: " + j + "이(가) 최종과 다른 건");
+      o.value = j;
+      sel.appendChild(o);
+    });
+    sel.value = S.judge;
+    sel.addEventListener("change", function () { S.judge = sel.value; render(); });
+    row.appendChild(sel);
+    bar.appendChild(row);
+    bar.appendChild(el("div", "muted", "내 판정 전의 건은 필터에 걸리지 않고 항상 보입니다."));
+    app.appendChild(bar);
+
+    var byQ = {}, order = [];
+    DATA.groups.forEach(function (g) {
+      var bids = g.bids.filter(function (b) { return passes(ITEMS[b]); });
+      if (!bids.length) return;
+      if (!byQ[g.qid]) { byQ[g.qid] = []; order.push(g.qid); }
+      byQ[g.qid].push({ repeat: g.repeat, bids: bids });
+    });
+    if (!order.length) app.appendChild(el("div", "card", "조건에 맞는 건이 없습니다."));
+    order.forEach(function (qid) {
+      var first = ITEMS[byQ[qid][0].bids[0]];
+      var qd = el("details");
+      qd.open = order.length <= 3;
+      qd.appendChild(el("summary", "", qid + " · " + first.qtype + " · " + first.question));
+      var inner = el("div", "inner");
+      byQ[qid].forEach(function (rg) {
+        inner.appendChild(el("h4", "", rg.repeat + "회차"));
+        rg.bids.forEach(function (b) {
+          var it = ITEMS[b];
+          var d = el("details");
+          var s = el("summary", "", it.bid);
+          if (revealed(it)) {
+            s.appendChild(el("span", "badge " + vcls(it.majority), "다수결 " + it.majority));
+            s.appendChild(el("span", "badge", "최종 " + finalText(it.correct)));
+          } else {
+            s.appendChild(el("span", "badge need", "내 판정 필요"));
+          }
+          if (S.mine[b]) s.appendChild(el("span", "badge " + vcls(S.mine[b].verdict), "내 판정 " + S.mine[b].verdict));
+          d.appendChild(s);
+          var body = el("div", "inner");
+          var built = false;
+          d.addEventListener("toggle", function () {   // 펼칠 때 한 번만 만든다 (건이 많아도 가볍게)
+            if (!d.open || built) return;
+            built = true;
+            body.appendChild(itemBody(it));
+            body.appendChild(detailNode(it));
+          });
+          d.appendChild(body);
+          inner.appendChild(d);
+        });
+      });
+      qd.appendChild(inner);
+      app.appendChild(qd);
+    });
+  }
+
+  // ---- 내보내기 ----
+  function doExport() {
+    var items = Object.keys(S.mine).sort().map(function (bid) {
+      var m = S.mine[bid];
+      return { bid: bid, verdict: m.verdict, reason: m.reason, at: m.at, blind: m.blind === true };
+    });
+    var criteria = Object.keys(S.crit).sort().map(function (bid) {
+      var c = S.crit[bid];
+      return { bid: bid, odd: c.odd, note: c.note, at: c.at };
+    });
+    S.exportText = JSON.stringify({ run: DATA.run, items: items, criteria: criteria }, null, 1);
+    try {
+      var blob = new Blob([S.exportText], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "human-" + DATA.run + ".json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) { /* 아래 텍스트 상자에서 복사 */ }
+    render();
+  }
+
+  function render() {
+    renderTop();
+    var app = document.getElementById("app");
+    clear(app);
+    if (S.showRubric) app.appendChild(rubricNode());
+    if (S.mode === "mine") renderMine(app); else renderView(app);
+    if (S.exportText) {
+      var box = el("div", "card");
+      box.appendChild(el("div", "muted", "내보낸 내용 (다운로드가 안 되면 복사해서 파일로 저장하세요)"));
+      var ta = document.createElement("textarea");
+      ta.id = "export-text"; ta.name = "export_text";
+      ta.readOnly = true;
+      ta.value = S.exportText;
+      box.appendChild(ta);
+      app.appendChild(box);
+    }
+  }
+
+  load();
+  render();
+})();
+</script>
+</body>
+</html>
