@@ -20,6 +20,8 @@ TEMPLATE = Path(__file__).parent / "templates" / "review.html"
 CORPUS_NAME = "docs-20261028"  # 평가 대상: docs/ 고정 사본 (ADR-004)
 DEFAULT_CORPUS = Path(__file__).resolve().parents[2] / "data" / "eval_corpus" / CORPUS_NAME
 MAX_EXCERPT_CHARS = 1500
+MAX_HITS = 2  # 문서마다 먼저 보여 줄 '핵심어가 나오는 줄' 수
+MAX_HIT_CHARS = 200
 
 # 판정 기준 창에 보여 주는 글. 면접관에게 준 채점표(judge.JUDGE_INSTRUCTION)를 쉬운 말로 옮긴 것이다.
 RUBRIC = [
@@ -89,7 +91,10 @@ def doc_excerpt(text: str, keywords: list[str], max_chars: int = MAX_EXCERPT_CHA
             break
         picked.append(ln[:max_chars])
         used += len(ln) + 1
-    return {"text": "\n".join(picked), "from": start + 1, "to": start + len(picked), "total": len(lines)}
+    # 핵심어가 나오는 줄 한두 개 (근거 문서 칸 맨 위에 먼저 보여 준다)
+    hits = [{"line": start + k + 1, "text": ln.strip()[:MAX_HIT_CHARS]} for k, ln in enumerate(picked)
+            if any(w in ln.lower() for w in low)][:MAX_HITS]
+    return {"text": "\n".join(picked), "from": start + 1, "to": start + len(picked), "total": len(lines), "hits": hits}
 
 
 def build_excerpts(records: list[dict], corpus_dir: Path = DEFAULT_CORPUS) -> dict[str, dict]:

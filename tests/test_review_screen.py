@@ -277,3 +277,53 @@ def test_export_in_template_includes_criteria_and_keeps_verdicts_separate():
     assert "criteria: criteria" in t and "items: items" in t
     assert "기준 의견 (판정과 따로, 선택)" in t and "이 기준이 이상함" in t and "한 줄 메모" in t
     assert "S.crit[bid]" in t and "S.mine[bid]" in t  # 따로 저장
+
+
+# ---- 근거 문서 읽기 좋게, 핵심어 표시 -----------------------------------------------------
+
+
+def test_excerpt_hits_are_the_keyword_lines_with_numbers():
+    text = "\n".join(f"줄{i}" for i in range(1, 31)) + "\n"
+    ex = doc_excerpt(text, ["줄20", "줄21"])
+    assert [h["line"] for h in ex["hits"]] == [20, 21]
+    assert [h["text"] for h in ex["hits"]] == ["줄20", "줄21"]
+    many = doc_excerpt("kw a\nkw b\nkw c\nkw d", ["kw"])
+    assert len(many["hits"]) == 2  # 문서마다 최대 두 줄
+    assert doc_excerpt("a\nb", [])["hits"] == [] and doc_excerpt("a\nb", ["없는말"])["hits"] == []
+    long = doc_excerpt("kw " + "가" * 1000, ["kw"], max_chars=5000)
+    assert len(long["hits"][0]["text"]) <= 200
+
+
+def test_hits_are_inside_the_picked_excerpt_and_numbered_from_the_document():
+    text = "\n".join(["앞"] * 10 + ["핵심어 줄"] + ["뒤"] * 30)
+    ex = doc_excerpt(text, ["핵심어"])
+    assert ex["hits"] == [{"line": 11, "text": "핵심어 줄"}]
+    assert ex["from"] <= 11 <= ex["to"]
+
+
+def test_highlight_and_toggle_are_built_with_safe_dom_only():
+    t = tpl()
+    # 근거 문서 발췌도 답과 같은 토글 함수로 그린다
+    assert t.count("mdToggleNode(") >= 3 and "mdToggleNode(e.text, kws)" in t and "mdToggleNode(it.answer, kwsOf(it))" in t
+    assert 'el("span", pc[1] ? "hl" : "", pc[0])' in t  # 표시는 span class + textContent
+    assert "핵심어가 나오는 줄" in t and "e.hits" in t
+    for bad in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert bad not in t, bad
+    md = t[t.index("/* MD-BEGIN */"):t.index("/* MD-END */")] + t[t.index("/* HL-BEGIN */"):t.index("/* HL-END */")]
+    assert "createElement" not in md and "document" not in md  # 변환 블록은 구조만 만들고 DOM은 안 만진다
+
+
+def test_highlight_applies_to_answer_and_excerpt_through_one_path():
+    t = tpl()
+    assert "renderInline(parent, segs, kws)" in t and "renderMarkdown(text, kws)" in t
+    assert t.count("appendHl(") >= 6  # 인라인, 링크, 코드 블록, 원문 보기, 핵심어 줄까지 모두 같은 함수
+    assert "--hl:" in t and ".hl {" in t
+
+
+def test_hits_reach_the_html_data_and_not_the_labels(folder):
+    items = make_items(2)
+    run(folder, items)
+    data = data_of(folder)
+    assert "excerpts" in data
+    html = (folder / "review.html").read_text(encoding="utf-8")
+    assert "baseline" not in html
