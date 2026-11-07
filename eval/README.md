@@ -143,6 +143,21 @@ python -m src.scripts.eval_rescore eval/results/20261028-2205_baseline-docs.json
 
 원래 jsonl은 그대로 두고 같은 폴더에 `_rescored.jsonl`, `_rescored.md`를 씁니다.
 
+## 면접관 자동화 (보조 도구)
+
+`_rescored-v2.jsonl`의 답을 면접관 3명(Claude haiku, Codex, Gemini)이 판정한다. 공식 판정이 아니라 사람 판정을 돕는 참고용이다.
+결과는 `data/eval/judge/<실행>/`에 남는다 (git 제외). `.env`에 `MALA_KDBX_PATH`, `KEEPASSXC_CLI`, `CODEX_JUDGE_MODELS`, `CODEX_JUDGE_EFFORT`, `GEMINI_JUDGE_MODELS`가 필요하다 (`.env.example` 참고). Gemini 키는 `.env`가 아니라 KeePassXC 금고의 `mala-gemini` 항목에만 둔다.
+
+```powershell
+# 첫 실행: 세 결과에서 골고루 10건 (Codex 월 한도 가늠). 금고 암호는 시작할 때 한 번 직접 입력한다.
+python -m src.scripts.eval_judge <A_rescored-v2.jsonl> <B_rescored-v2.jsonl> <C_rescored-v2.jsonl> --judges claude,codex,gemini --limit 10 --tag first10
+# 판정 불가 건만 같은 모델로 다시
+python -m src.scripts.eval_judge --resume data/eval/judge/<실행폴더>
+```
+
+- 출력: `judge_<면접관>.jsonl`, `majority.jsonl`, `review.md`(사람이 볼 목록, 결과 이름을 가림), `blind_map.json`(번호 대응, 판정 후에 열기), `summary.md`, `retries.log`, `run.json`.
+- Codex, Gemini는 시작 때 첫 모델에 확인 요청을 보내 되는 모델 하나로 그 실행 전체를 고정한다. 건마다 실제로 쓴 모델 이름이 판정 파일에 남는다.
+
 ## 결과 보관
 
 `eval_run`은 `data/eval/`(git 밖)에 씁니다. 기준선처럼 남길 결과는 `eval/results/`로 옮겨 git에 올립니다.

@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//**/*.kdbx)",
+      "Read(~/.codex/**)",
+      "Edit(.env)",
+
+      "Bash(*keepassxc-cli*)",
+      "Bash(*.kdbx*)",
+      "Bash(*.codex*)",
+      "Bash(cmdkey*)",
+      "Bash(python -m src.scripts.eval_judge*)",
+      "Bash(codex exec *)",
+
+      "PowerShell(*keepassxc-cli*)",
+      "PowerShell(*.kdbx*)",
+      "PowerShell(*.codex*)",
+      "PowerShell(cmdkey*)",
+      "PowerShell(python -m src.scripts.eval_judge*)",
+      "PowerShell(codex exec *)"
+    ]
+  }
+}
