@@ -369,6 +369,8 @@ Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 _CHILDREN: set = set()
 _CHILDREN_LOCK = threading.Lock()
 CHILD_TERMINATE_GRACE = 3.0  # Ctrl+C 뒤 자식 프로세스에 종료를 요청하고, 이 시간 안에 안 끝나면 강제 종료
+KILL_TREE_TIMEOUT = 10.0  # taskkill 자체를 기다리는 시간(초)
+DRAIN_TIMEOUT = 5.0  # 시간 초과로 끝낸 뒤 남은 출력을 비우며 기다리는 시간(초). 두 번째 communicate의 제한
 
 
 def tracked_run(cmd, *, input=None, timeout=None, capture_output=False, **kw):
@@ -389,8 +391,11 @@ def tracked_run(cmd, *, input=None, timeout=None, capture_output=False, **kw):
         try:
             out, err = proc.communicate(input, timeout=timeout)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
+            kill_process_tree(proc)
+            try:
+                proc.communicate(timeout=DRAIN_TIMEOUT)  # 남은 출력을 비운다. 제한이 없으면 파이프를 쥔 프로세스가 남을 때 여기서 멈춘다
+            except subprocess.TimeoutExpired:
+                pass  # 그래도 안 끝나면 읽기를 포기한다 (읽는 스레드는 데몬이라 종료를 막지 않는다)
             raise
         return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
     finally:
@@ -398,11 +403,38 @@ def tracked_run(cmd, *, input=None, timeout=None, capture_output=False, **kw):
             _CHILDREN.discard(proc)
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def kill_process_tree(proc, *, run: Callable[..., object] = subprocess.run) -> None:
+    """proc와 그 아래 프로세스를 모두 강제로 끝낸다.
+
+    npm으로 깐 codex는 codex.cmd라 윈도우에서는 cmd.exe가 껍데기가 되고 그 아래에 node가 돈다. proc.kill()은 껍데기만 끝내서
+    node가 파이프를 쥔 채 남을 수 있으므로, 윈도우에서는 `taskkill /T /F /PID`로 나무 전체를 끝낸다. 그 밖의 환경이거나
+    taskkill이 실패해도 proc.kill()은 한다 (이미 끝난 프로세스에 대한 오류는 무시).
+    """
+    pid = getattr(proc, "pid", None)
+    if _is_windows() and isinstance(pid, int):
+        try:
+            run(["taskkill", "/T", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=KILL_TREE_TIMEOUT, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass  # taskkill이 없거나 오래 걸리면 아래 kill()로 껍데기라도 끝낸다
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
 def terminate_children(grace: float = CHILD_TERMINATE_GRACE) -> int:
     """실행 중인 자식 프로세스에 종료를 요청하고, grace초 안에 안 끝나면 kill한다. 대상 수를 돌려준다."""
     with _CHILDREN_LOCK:
         procs = [pr for pr in _CHILDREN if pr.poll() is None]
     for pr in procs:
+        if _is_windows():
+            # 윈도우의 terminate()는 곧바로 강제 종료라 껍데기만 끝내고, 그러면 아래 단계는 하위 프로세스를 못 찾는다. 나무 전체를 먼저 끝낸다
+            kill_process_tree(pr)
         try:
             pr.terminate()
         except OSError:
@@ -412,10 +444,7 @@ def terminate_children(grace: float = CHILD_TERMINATE_GRACE) -> int:
         try:
             pr.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            try:
-                pr.kill()
-            except OSError:
-                pass
+            kill_process_tree(pr)
     return len(procs)
 
 
