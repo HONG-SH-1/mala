@@ -1,7 +1,12 @@
-"""안전장치 — 공개 문서 컬렉션(mala_eval_docs...)에서 나온 결과만 외부 면접관(codex, gemini)에 보낸다.
+"""안전장치 — 공개 문서 컬렉션(mala_eval_docs...)에서 나온 결과만 면접관(claude, codex, gemini)에 보낸다.
+
+`claude -p`도 글을 밖으로 보내는 것이라 codex, gemini와 같은 검사를 받는다. 1라운드 면접관뿐 아니라
+토론 중재자(비교 중재자 포함)도 같다. 검사를 면제할 이름만 EXEMPT_JUDGES에 적고(지금은 비어 있음),
+그 밖의 이름은 처음 보는 것이라도 전부 외부로 본다.
 
 허용 목록 방식이다: 컬렉션 이름이 mala_eval_docs로 시작해야 통과하고, 그 밖의 이름(볼트 포함)이나
-이름을 알 수 없는 경우는 모두 거부한다.
+이름을 알 수 없는 경우는 모두 거부한다. 결과 .md에 "볼트:" 줄이 있으면 그 경로도 data/eval_corpus/ 안이어야 한다
+(컬렉션 이름만 맞고 볼트가 진짜 볼트인 결과를 막는다).
 
 컬렉션 이름이 남는 곳: 평가 실행이 쓰는 원래 결과 `.md`의 "컬렉션: <이름>" 줄.
 `.jsonl` 안에는 없다. 재채점 파일(`_rescored-v2.jsonl`)의 짝은 같은 이름에서 `_rescored...`를 뗀 `.md`다.
@@ -18,10 +23,13 @@ from pathlib import Path
 
 import yaml
 
-EXTERNAL_JUDGES = ("codex", "gemini")
+EXEMPT_JUDGES: tuple[str, ...] = ()  # 검사를 면제할 면접관 이름. 비어 있으면 모든 면접관이 검사를 받는다
 OVERRIDES_NAME = "source_overrides.yaml"
 ALLOWED_PREFIX = "mala_eval_docs"  # 공개 docs 사본으로 만든 평가 컬렉션
+ALLOWED_VAULT_DIR = "data/eval_corpus"  # 평가용 공개 문서 사본이 있는 폴더 (레포 기준)
 _COLLECTION_RE = re.compile(r"컬렉션:\s*([^\s,]+)")
+_VAULT_RE = re.compile(r"볼트:\s*(.*?)\s*(?:,\s*컬렉션:|$)")
+_ABSOLUTE_RE = re.compile(r"^(?:[A-Za-z]:/|/)")
 _RESCORED_SUFFIX = re.compile(r"(_rescored(-v\d+)?)+$")
 
 
@@ -111,9 +119,40 @@ def collections_of(jsonl_path: str | Path, root: Path | None = None) -> list[str
     return found
 
 
+def vaults_of(jsonl_path: str | Path, root: Path | None = None) -> list[str]:
+    """짝 .md의 "볼트: <경로>" 줄에서 읽은 경로들 (줄이 없으면 빈 목록)."""
+    found: list[str] = []
+    for md in result_md_candidates(jsonl_path, root):
+        if not md.is_file():
+            continue
+        for line in md.read_text(encoding="utf-8", errors="replace").splitlines()[:40]:
+            m = _VAULT_RE.search(line)
+            if m and "볼트:" in line:
+                found.append(m.group(1))
+                break
+    return found
+
+
+def vault_is_allowed(raw: str, root: Path | None = None) -> bool:
+    """볼트 경로가 레포의 data/eval_corpus/ 안인가. 모르거나 "-"이거나 ".."로 빠져나가면 False."""
+    s = (raw or "").strip().strip("\"'").replace("\\", "/")
+    if not s or s == "-" or ".." in s.split("/"):
+        return False
+    if _ABSOLUTE_RE.match(s):
+        if root is None:
+            return False
+        corpus = (root / ALLOWED_VAULT_DIR).resolve()
+        target = Path(s).resolve()
+        return target != corpus and _inside(target, corpus)
+    while s.startswith("./"):
+        s = s[2:]
+    prefix = ALLOWED_VAULT_DIR + "/"
+    return s.startswith(prefix) and len(s) > len(prefix)
+
+
 def check_external_judges(files: list[str], judge_names: list[str], root: Path | None = None) -> None:
-    """codex나 gemini를 쓰려는데 입력이 볼트 컬렉션이거나 컬렉션을 알 수 없으면 SystemExit."""
-    external = [n for n in judge_names if n in EXTERNAL_JUDGES]
+    """면접관(1라운드, 토론 중재자 모두)이 하나라도 있는데 입력이 볼트 결과이거나 출처를 알 수 없으면 SystemExit."""
+    external = list(dict.fromkeys(n for n in judge_names if n not in EXEMPT_JUDGES))
     if not external:
         return
     problems: list[str] = []
@@ -123,9 +162,12 @@ def check_external_judges(files: list[str], judge_names: list[str], root: Path |
             problems.append(f"{Path(f).name}: 컬렉션 이름을 찾지 못함 (짝 .md에 '컬렉션:' 줄이 없음)")
         elif not all(n.startswith(ALLOWED_PREFIX) for n in names):
             problems.append(f"{Path(f).name}: 컬렉션 {', '.join(names)} (허용: {ALLOWED_PREFIX}...)")
+        bad_vaults = [v for v in vaults_of(f, root) if not vault_is_allowed(v, root)]
+        if bad_vaults:
+            problems.append(f"{Path(f).name}: 볼트 경로 {', '.join(bad_vaults)} (허용: {ALLOWED_VAULT_DIR}/ 안)")
     if problems:
         raise SystemExit(
             f"{', '.join(external)} 실행을 거부합니다. 공개 문서 컬렉션이 아니거나 출처를 확인할 수 없는 결과가 있습니다:\n  "
             + "\n  ".join(problems)
-            + "\n공개 문서(docs) 기준 결과만 외부 면접관에 보낼 수 있습니다. claude만 쓰려면 --judges claude."
+            + "\n공개 문서(docs) 기준 결과만 면접관(claude 포함)에 보낼 수 있습니다. claude -p도 외부 전송입니다."
         )

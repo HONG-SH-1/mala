@@ -153,7 +153,7 @@ def write_result(d, stem, collection, rescored=True):
     md = d / f"{stem}.md"
     lines = ["# 평가 결과", "", "- 시각: x"]
     if collection:
-        lines.append(f"- 볼트: data/x, 컬렉션: {collection}")
+        lines.append(f"- 볼트: data/eval_corpus/x, 컬렉션: {collection}")
     md.write_text("\n".join(lines), encoding="utf-8")
     jsonl = d / (f"{stem}_rescored-v2.jsonl" if rescored else f"{stem}.jsonl")
     jsonl.write_text("{}\n", encoding="utf-8")
@@ -168,11 +168,10 @@ def test_guard_reads_collection_from_original_md(tmp_path):
 
 def test_guard_refuses_non_docs_collection_for_codex_and_gemini(tmp_path):
     f = write_result(tmp_path, "run1", "mala_vault_prefix")
-    for judges in (["codex"], ["gemini"], ["claude", "codex", "gemini"]):
+    for judges in (["codex"], ["gemini"], ["claude"], ["claude", "codex", "gemini"]):
         with pytest.raises(SystemExit) as ei:
             check_external_judges([f], judges)
-        assert "run1" in str(ei.value) and "mala_vault_prefix" in str(ei.value)
-    check_external_judges([f], ["claude"])  # claude만이면 막지 않는다
+        assert "run1" in str(ei.value) and "mala_vault_prefix" in str(ei.value)  # claude -p도 외부 전송이라 같이 막는다
 
 
 def test_guard_stops_when_collection_unknown(tmp_path):
@@ -191,9 +190,9 @@ def test_guard_allows_only_public_docs_collections(tmp_path):
         check_external_judges([write_result(tmp_path, f"ok-{name}", name)], ["codex", "gemini"])
     for name in ("mala_vault", "mala_eval", "other_docs", "MALA_EVAL_DOCS", "xmala_eval_docs"):
         f = write_result(tmp_path, f"no-{name}", name)
-        with pytest.raises(SystemExit):
-            check_external_judges([f], ["gemini"])
-        check_external_judges([f], ["claude"])
+        for who in ("gemini", "claude"):
+            with pytest.raises(SystemExit):
+                check_external_judges([f], [who])
 
 
 def test_guard_checks_every_file(tmp_path):
@@ -252,9 +251,9 @@ def test_override_gets_same_allow_list_rule(tmp_path):
     for bad in ("mala_vault", "other_docs", "MALA_EVAL_DOCS"):
         f = write_result(res, f"r-{bad}", None)
         write_override(res, f"r-{bad}", bad)
-        with pytest.raises(SystemExit):
-            check_external_judges([f], ["codex"], root)
-        check_external_judges([f], ["claude"], root)
+        for who in ("codex", "claude"):
+            with pytest.raises(SystemExit):
+                check_external_judges([f], [who], root)
 
 
 def test_override_is_per_result_and_handles_bad_yaml(tmp_path):

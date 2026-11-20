@@ -23,7 +23,7 @@
     python -m src.scripts.eval_judge --import-human data/eval/judge/<실행폴더> human-<실행폴더>.json
 
 금고 암호는 gemini를 쓸 때 시작에 한 번 터미널에서 직접 친다.
-codex, gemini는 mala_eval_docs 컬렉션 결과에만 쓴다 (그 밖이거나 알 수 없으면 거부) (judge_guard).
+모든 면접관(claude 포함)과 토론 중재자는 mala_eval_docs 컬렉션, data/eval_corpus/ 볼트 결과에만 쓴다 (그 밖이거나 알 수 없으면 거부) (judge_guard).
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ def debate_main(args) -> int:
     load_dotenv(_ROOT / ".env")
     arb = resolve_arbiter(args.arbiter, os.environ, models)
     cmp_ = compare_arbiter(arb[0], models, os.environ) if args.arbiter_compare else None
-    # 안전장치: 키를 꺼내기 전에 입력의 출처를 본다 (외부 면접관은 mala_eval_docs 결과만)
+    # 안전장치: 키를 꺼내기 전에 입력의 출처를 본다 (1라운드 면접관과 중재자 모두, mala_eval_docs 결과만)
     check_external_judges(list(meta["files"]), names + [arb[0]] + ([cmp_[0]] if cmp_ else []), _ROOT)
     rpm = resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM"))
     est = estimate(items, groups, r1, names, gemini_rpm=rpm, arbiter_names=[arb[0]] + ([cmp_[0]] if cmp_ else []))

@@ -145,7 +145,7 @@ def make_sources(tmp_path, collection="mala_eval_docs"):
     res.mkdir()
     f = res / "docs-run_rescored-v2.jsonl"
     f.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records()), encoding="utf-8")
-    (res / "docs-run.md").write_text(f"- 볼트: x, 컬렉션: {collection}\n", encoding="utf-8")
+    (res / "docs-run.md").write_text(f"- 볼트: data/eval_corpus/x, 컬렉션: {collection}\n", encoding="utf-8")
     qf = tmp_path / "q.yaml"
     qf.write_text("".join(f"- id: {x.id}\n  question: \"{x.question}\"\n  type: {x.type}\n  expected_sources: {json.dumps(x.expected_sources)}\n"
                           f"  must_include: {json.dumps(x.must_include, ensure_ascii=False)}\n" for x in QS), encoding="utf-8")

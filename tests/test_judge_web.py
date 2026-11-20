@@ -308,6 +308,8 @@ def real_folder(tmp_path):
     rec = tmp_path / "docs-run_rescored-v2.jsonl"
     rec.write_text("".join(json.dumps({"label": "L", "id": f"q0{i}", "repeat": 1, "answer": f"답{i}", "auto_correct": True,
                                        "correct": True}) + "\n" for i in range(2)), encoding="utf-8")
+    # claude도 가드를 타므로 짝 .md가 필요하다 (공개 문서 컬렉션)
+    (tmp_path / "docs-run.md").write_text("- 볼트: data/eval_corpus/x, 컬렉션: mala_eval_docs\n", encoding="utf-8")
     folder = tmp_path / "judge" / "20261107-1000_t"
     folder.mkdir(parents=True)
     (folder / "inputs.json").write_text(json.dumps({"files": [str(rec)], "judges": ["claude"], "seed": 3, "limit": None,

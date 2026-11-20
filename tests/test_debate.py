@@ -508,7 +508,7 @@ def real_folder(tmp_path):
     rec = res / "docs-run_rescored-v2.jsonl"
     rec.write_text("".join(json.dumps({"label": "L", "id": f"q0{i}", "repeat": 1, "answer": f"답{i}", "auto_correct": True, "correct": True}) + "\n"
                            for i in range(4)), encoding="utf-8")
-    (res / "docs-run.md").write_text("- 볼트: x, 컬렉션: mala_eval_docs\n", encoding="utf-8")
+    (res / "docs-run.md").write_text("- 볼트: data/eval_corpus/x, 컬렉션: mala_eval_docs\n", encoding="utf-8")
     folder = tmp_path / "judge" / "20261107-1000_t"
     folder.mkdir(parents=True)
     (folder / "inputs.json").write_text(json.dumps({"files": [str(rec)], "judges": NAMES, "seed": 3, "limit": None, "questions": str(qfile)}), encoding="utf-8")
@@ -559,6 +559,29 @@ def test_vault_result_is_refused_before_any_key_or_folder(real_folder, monkeypat
     with pytest.raises(SystemExit) as ei:
         ej.main(["--debate", str(folder), "--dry-run"])
     assert "공개 문서(docs) 기준" in str(ei.value) and not (folder / "debate").exists()
+
+
+def test_guard_receives_the_arbiter_and_compare_arbiter_names(real_folder, monkeypatch):
+    """중재자(ARBITER_JUDGE, --arbiter, 비교 중재자)도 1라운드 면접관과 같은 가드를 탄다."""
+    folder, _res, _ = real_folder
+    no_keys(monkeypatch)
+    seen = []
+    monkeypatch.setattr(ej, "check_external_judges", lambda files, names, root=None: seen.append(list(names)))
+    monkeypatch.setenv("ARBITER_JUDGE", "gemini")
+    assert ej.main(["--debate", str(folder), "--dry-run", "--arbiter-compare"]) == 0
+    assert seen[-1][-2:] == ["gemini", "claude"]  # 1라운드 면접관 뒤에 중재자, 비교 중재자 순
+    assert ej.main(["--debate", str(folder), "--dry-run", "--arbiter", "codex:gpt-x"]) == 0
+    assert seen[-1][-1] == "codex"
+
+
+@pytest.mark.parametrize("arbiter", ["claude:sonnet", "codex:gpt-x", "gemini"])
+def test_every_arbiter_is_refused_on_a_vault_result_even_with_a_docs_collection_name(real_folder, monkeypatch, arbiter):
+    folder, res, _ = real_folder
+    no_keys(monkeypatch)
+    (res / "docs-run.md").write_text("- 볼트: C:/Users/me/진짜볼트, 컬렉션: mala_eval_docs\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as ei:
+        ej.main(["--debate", str(folder), "--dry-run", "--arbiter", arbiter])
+    assert "볼트 경로" in str(ei.value) and not (folder / "debate").exists()
 
 
 def test_debate_needs_three_judges(real_folder, monkeypatch, capsys):
