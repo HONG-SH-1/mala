@@ -39,6 +39,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.eval.judge import (
+    GEMINI_MODEL_RE,
     JUDGE_NAMES,
     ClaudeJudge,
     CodexJudge,
@@ -54,6 +55,8 @@ from src.eval.judge import (
     quiet_http_logs,
     select_items,
     shuffle_items,
+    validate_effort,
+    validate_model,
 )
 from src.eval.judge_guard import check_external_judges
 from src.eval.judge_human import HumanImportError, atomic_write_text, import_human
@@ -71,14 +74,30 @@ def _env_list(name: str) -> list[str]:
     return [p.strip() for p in (os.environ.get(name) or "").split(",") if p.strip()]
 
 
+UNSAFE_PATH_CHARS = frozenset('&|<>^%!"')  # codex.cmd를 cmd.exe가 실행할 때 명령으로 해석되는 글자
+
+
+def _checked(var: str, check, *args, **kw):
+    """검사 함수의 ValueError를 어느 설정이 틀렸는지 알려 주는 SystemExit로 바꾼다 (아무것도 호출하기 전에 멈춘다)."""
+    try:
+        return check(*args, **kw)
+    except ValueError as exc:
+        raise SystemExit(f"{var}: {exc}") from None
+
+
 def resolve_workdir(raw: str | None, root: Path = _ROOT) -> Path:
     """면접관이 실행될 폴더. .env의 JUDGE_WORKDIR에서 읽고, 없거나 레포 안이면 시작 전에 멈춘다.
 
     레포 안에서 돌리면 CLAUDE.md 같은 파일이 면접관 입력에 섞인다 (파일럿에서 겪음).
+    경로가 명령 인자로 들어가므로 & | < > ^ % ! " 와 제어 문자가 있으면 거부한다.
     """
     raw = (raw or "").strip()
     if not raw:
         raise SystemExit(".env에 JUDGE_WORKDIR가 없음: 레포 밖 빈 폴더 경로를 적으세요.")
+    bad = sorted({c for c in raw if c in UNSAFE_PATH_CHARS or ord(c) < 32})
+    if bad:
+        shown = " ".join(repr(c)[1:-1] for c in bad)
+        raise SystemExit(f"JUDGE_WORKDIR에 쓸 수 없는 글자가 있음 ({shown}): 이 글자가 없는 폴더 경로로 바꾸세요.")
     path = Path(raw).expanduser()
     if not path.is_dir():
         raise SystemExit("JUDGE_WORKDIR 폴더가 없음: 먼저 만드세요.")
@@ -113,14 +132,15 @@ def _build_specs(names: list[str], workdir: Path, gemini_rpm: float | None):
         if name == "claude":
             specs.append(JudgeSpec("claude", [None], lambda m: ClaudeJudge(workdir), ping=False))
         elif name == "codex":
-            models = _env_list("CODEX_JUDGE_MODELS")
-            effort = (os.environ.get("CODEX_JUDGE_EFFORT") or "low").strip()
+            models = [_checked("CODEX_JUDGE_MODELS", validate_model, m, "codex 모델 이름") for m in _env_list("CODEX_JUDGE_MODELS")]
+            effort = _checked("CODEX_JUDGE_EFFORT", validate_effort, (os.environ.get("CODEX_JUDGE_EFFORT") or "low").strip(), "codex effort")
             if not models:
                 specs.append(JudgeSpec("codex", [], lambda m: None, unavailable=".env에 CODEX_JUDGE_MODELS가 없음"))
             else:
                 specs.append(JudgeSpec("codex", list(models), lambda m, e=effort: CodexJudge(workdir, str(m), e)))
         elif name == "gemini":
-            models = _env_list("GEMINI_JUDGE_MODELS")
+            models = [_checked("GEMINI_JUDGE_MODELS", validate_model, m, "gemini 모델 이름", pattern=GEMINI_MODEL_RE)
+                      for m in _env_list("GEMINI_JUDGE_MODELS")]  # URL 경로에 들어가므로 키를 꺼내기 전에 검사
             if not models:
                 specs.append(JudgeSpec("gemini", [], lambda m: None, unavailable=".env에 GEMINI_JUDGE_MODELS가 없음"))
                 continue
@@ -179,13 +199,16 @@ def resolve_arbiter(cli_value: str | None, env, state_models: dict) -> tuple[str
         name, _, m = cli_value.partition(":")
         model = m.strip() or None
     name = name.strip()
-    if name not in JUDGE_NAMES:
-        raise SystemExit(f"중재 면접관은 {JUDGE_NAMES} 중에서 고르세요: {name}")
+    if name not in JUDGE_NAMES:  # 허용 목록: claude, codex, gemini만 (대소문자, 덧붙은 글자도 거부)
+        raise SystemExit(f"중재 면접관은 {JUDGE_NAMES} 중에서 고르세요: {name[:40]!r}")
     if name == "claude":
         model = model or "sonnet"
     else:
         model = model or state_models.get(name)
     effort = (env.get("ARBITER_EFFORT") or "").strip() or DEFAULT_ARBITER_EFFORT
+    if model is not None:
+        model = _checked("ARBITER_MODEL 또는 --arbiter", validate_model, model, "중재 모델 이름")
+    _checked("ARBITER_EFFORT", validate_effort, effort, "중재 effort")
     return name, model, effort
 
 
@@ -193,7 +216,10 @@ def compare_arbiter(primary: str, state_models: dict, env=None) -> tuple[str, st
     """다른 계열 중재자: claude이면 codex(effort medium), 그 밖이면 claude sonnet. 계열 편향을 보려는 비교용이다."""
     if primary == "claude":
         models = _env_list("CODEX_JUDGE_MODELS")
-        return "codex", state_models.get("codex") or (models[0] if models else None), DEFAULT_ARBITER_EFFORT
+        model = state_models.get("codex") or (models[0] if models else None)
+        if model is not None:
+            model = _checked("비교 중재 모델(CODEX_JUDGE_MODELS)", validate_model, model, "codex 모델 이름")
+        return "codex", model, DEFAULT_ARBITER_EFFORT
     return "claude", "sonnet", DEFAULT_ARBITER_EFFORT
 
 

@@ -584,6 +584,16 @@ def test_every_arbiter_is_refused_on_a_vault_result_even_with_a_docs_collection_
     assert "볼트 경로" in str(ei.value) and not (folder / "debate").exists()
 
 
+@pytest.mark.parametrize("var,value", [("ARBITER_JUDGE", "claude&calc"), ("ARBITER_MODEL", "evil|x"), ("ARBITER_EFFORT", "minimal")])
+def test_bad_arbiter_env_stops_debate_before_estimate_or_any_call(real_folder, monkeypatch, capsys, var, value):
+    folder, _res, _ = real_folder
+    no_keys(monkeypatch)
+    monkeypatch.setenv(var, value)
+    with pytest.raises(SystemExit):
+        ej.main(["--debate", str(folder), "--dry-run"])
+    assert "토론 대상" not in capsys.readouterr().out and not (folder / "debate").exists()
+
+
 def test_debate_needs_three_judges(real_folder, monkeypatch, capsys):
     folder, _res, _ = real_folder
     no_keys(monkeypatch)

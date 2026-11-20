@@ -70,6 +70,33 @@ STOP_GRACE_SECONDS = 5.0  # Ctrl+C 뒤 스레드가 끝나길 기다리는 시�
 
 JUDGE_NAMES = ("claude", "codex", "gemini")
 
+# --------------------------------------------------------------------------
+# .env 값 검사: 모델 이름과 effort는 명령 인자(codex.cmd는 cmd.exe가 해석)나 URL에 그대로 들어간다
+# --------------------------------------------------------------------------
+
+# 첫 글자는 영숫자만 (-로 시작하면 옵션으로 읽힌다). & | < > ^ % ! " 공백 따옴표 같은 글자는 처음부터 허용하지 않는다.
+MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-\[\]]{0,63}$")
+GEMINI_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")  # URL 경로에 들어가므로 : 도 뺀다
+# `codex debug models`의 모델 목록에서 확인한 값 (2026-11-21). 모델마다 지원하는 값은 다르므로 목록 밖 값만 거른다.
+CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+
+def _shown(value: object) -> str:
+    return repr(str(value)[:40])
+
+
+def validate_model(value: str, what: str = "모델 이름", *, pattern: re.Pattern = MODEL_NAME_RE) -> str:
+    """통과하면 그대로, 아니면 ValueError (메시지에는 값을 40자까지만 보여 준다)."""
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise ValueError(f"{what} 형식이 이상합니다: {_shown(value)} (영문자나 숫자로 시작, 영문자·숫자와 . _ : - [ ] 만, 64자 이하)")
+    return value
+
+
+def validate_effort(value: str, what: str = "effort") -> str:
+    if value not in CODEX_EFFORTS:
+        raise ValueError(f"{what} 값이 허용 목록에 없습니다: {_shown(value)} (허용: {', '.join(CODEX_EFFORTS)})")
+    return value
+
 
 # --------------------------------------------------------------------------
 # 호출 결과와 오류
@@ -343,7 +370,7 @@ class ClaudeJudge:
     name = "claude"
 
     def __init__(self, workdir: Path, *, model: str = "haiku", runner: Runner = tracked_run, timeout: float = 180) -> None:
-        self.model = model
+        self.model = validate_model(model, "claude 모델 이름")
         self.workdir = workdir
         self.runner = runner
         self.timeout = timeout
@@ -426,8 +453,8 @@ class CodexJudge:
     name = "codex"
 
     def __init__(self, workdir: Path, model: str, effort: str, *, runner: Runner = tracked_run, timeout: float = 300) -> None:
-        self.model = model
-        self.effort = effort
+        self.model = validate_model(model, "codex 모델 이름")
+        self.effort = validate_effort(effort, "codex effort")
         self.workdir = workdir
         self.runner = runner
         self.timeout = timeout
@@ -501,9 +528,7 @@ class GeminiJudge:
     name = "gemini"
 
     def __init__(self, model: str, key: Secret, *, client: httpx.Client | None = None, limiter: RateLimiter | None = None, timeout: float = GEMINI_HTTP_TIMEOUT) -> None:
-        if not model or not all(c.isalnum() or c in "._-" for c in model):
-            raise ValueError("모델 이름 형식이 이상합니다.")
-        self.model = model
+        self.model = validate_model(model, "gemini 모델 이름", pattern=GEMINI_MODEL_RE)
         self._key = key
         self.client = client or httpx.Client(timeout=timeout)
         self.limiter = limiter
