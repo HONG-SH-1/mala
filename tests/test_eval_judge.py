@@ -300,11 +300,12 @@ def test_valid_format():
     assert parse_verdict(OK)[0]["verdict"] == "합격"
 
 
-def test_bad_format_counts_as_hold(tmp_path, log):
+def test_bad_format_is_unavailable_so_resume_runs_it_again(tmp_path, log):
+    """형식 오류를 보류로 굳히면 이어하기에서 다시 안 돌고 3단계를 부른다. 판정불가로 두고 다시 돈다 (정확성 4)."""
     j = FakeJudge(script=["not json"])
     run_judge(j, make_items(1), tmp_path / "j.jsonl", log=log, sleep=lambda s: None)
     row = next(iter(load_rows(tmp_path / "j.jsonl").values()))
-    assert row["verdict"] == "보류" and row["status"] == "format_error"
+    assert row["verdict"] == UNAVAILABLE and row["status"] == "format_error" and row["reason"].startswith("형식 오류")
 
 
 def test_decide():

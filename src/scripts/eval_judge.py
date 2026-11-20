@@ -53,10 +53,12 @@ from src.eval.judge import (
     finalize,
     pending_counts,
     quiet_http_logs,
+    input_fingerprint,
     select_items,
     shuffle_items,
     validate_effort,
     validate_model,
+    verify_inputs,
 )
 from src.eval.judge_guard import check_external_judges
 from src.eval.judge_human import HumanImportError, atomic_write_text, import_human
@@ -157,10 +159,18 @@ def _build_specs(names: list[str], workdir: Path, gemini_rpm: float | None):
     return specs, secrets
 
 
+def _check_inputs(meta: dict) -> None:
+    """지문이 다르면 SystemExit, 지문이 없는 옛 폴더면 경고만 한다 (--resume, --rebuild, --debate 공통)."""
+    warning = verify_inputs(meta)
+    if warning:
+        print("경고: " + warning, file=sys.stderr)
+
+
 def load_folder(out_dir: Path):
     """실행 폴더에서 (items, state, meta)를 다시 만든다. 판정 호출은 하지 않는다."""
     meta = json.loads((out_dir / "inputs.json").read_text(encoding="utf-8"))
     state = json.loads((out_dir / "run.json").read_text(encoding="utf-8"))
+    _check_inputs(meta)  # 질문 파일이나 채점 지시문이 실행 때와 다르면 여기서 멈춘다
     questions = load_questions(meta["questions"])
     items = build_items([r for f in meta["files"] for r in load_records(f)], questions)
     keep = set(state["items"])
@@ -401,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.resume:
             out_dir = Path(args.resume)
             meta = json.loads((out_dir / "inputs.json").read_text(encoding="utf-8"))
+            _check_inputs(meta)  # 키를 꺼내거나 아무것도 쓰기 전에 (다르면 멈춤)
             files, names = meta["files"], meta["judges"]
             seed, limit, qpath = meta["seed"], meta["limit"], meta["questions"]
             keep = set(json.loads((out_dir / "run.json").read_text(encoding="utf-8"))["items"])
@@ -433,7 +444,8 @@ def main(argv: list[str] | None = None) -> int:
             write_static(out_dir, items, ensure_blind_map(out_dir, items), old)
         if not args.resume:
             atomic_write_text(out_dir / "inputs.json", json.dumps(
-                {"files": list(files), "judges": names, "seed": seed, "limit": limit, "questions": qpath}, ensure_ascii=False, indent=1))
+                {"files": list(files), "judges": names, "seed": seed, "limit": limit, "questions": qpath,
+                 **input_fingerprint(qpath, list(files))}, ensure_ascii=False, indent=1))
 
         # 면접관 실행은 레포 밖 폴더(JUDGE_WORKDIR)에서 한다 (CLAUDE.md, 설정 파일이 섞이지 않게)
         specs, secrets = _build_specs(names, workdir, resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM")))
