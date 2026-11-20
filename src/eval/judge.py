@@ -112,6 +112,10 @@ RUN_ATTEMPTS = 6  # 첫 시도 + 재시도 5번 (대기 2, 4, 8, 16, 32초)
 PING_ATTEMPTS = 3  # 시작 확인은 모델마다 최대 3번
 MAX_RETRY_AFTER = 300.0
 CONSECUTIVE_FAIL_LIMIT = 5  # 연속으로 끝내 실패하면 그 면접관을 멈춘다 (건마다 62초씩 낭비 방지)
+# 시간 초과는 한 번에 3~5분을 쓰므로 일반 오류보다 훨씬 일찍 끊는다. 최악의 호출 수: 2 x 3 = 6번
+# (예전에는 6 x 5 = 30번: Codex(300초) 약 155분, Claude(180초) 95분).
+TIMEOUT_ATTEMPTS = 2  # 한 건에서 시간 초과가 이만큼 나오면 그 건은 포기
+TIMEOUT_FAIL_LIMIT = 3  # 시간 초과로 포기한 건이 연속 이만큼이면 그 면접관을 멈춘다
 
 class Interrupted(Exception):
     """사용자가 Ctrl+C로 멈춤. 대기(sleep) 도중이나 건 사이에서 던져진다."""
@@ -490,13 +494,22 @@ def extract_codex_tokens(stdout: str) -> int | None:
     return best
 
 
-def _codex_error_kind(blob: str) -> tuple[str, str]:
-    low = blob.lower()
-    if any(w in low for w in ("401", "403", "unauthorized", "not logged in", "log in", "login")):
+# 상태 코드는 숫자 경계로만 인정한다 (앞뒤에 글자, 숫자, . : / - 가 붙은 "4012", "src/x.rs:401"은 코드가 아니다)
+_AUTH_RE = re.compile(r"(?<![\w.:/\-])(?:401|403)(?!\w)|unauthori[sz]ed|not logged in")
+_MODEL_CODE_RE = re.compile(r"(?<![\w.:/\-])(?:400|404)(?!\w)")
+
+
+def _codex_error_kind(stderr: str) -> tuple[str, str]:
+    """Codex가 실패(종료 코드 0이 아님)했을 때 stderr만 보고 오류를 나눈다.
+
+    stdout(--json 이벤트)에는 모델이 쓴 글이 섞여 있어 "401", "login" 같은 글자가 나올 수 있으므로 보지 않는다.
+    단독 "login", "log in"은 인증 실패로 보지 않는다 (일시 오류를 인증 실패로 오해해 면접관을 멈추지 않게).
+    """
+    low = (stderr or "").lower()
+    if _AUTH_RE.search(low):
         return "auth", "auth"
-    if any(w in low for w in ("model", "404", "400")) and any(
-        w in low for w in ("not found", "does not exist", "not supported", "unsupported", "invalid", "unknown", "404", "400")
-    ):
+    code = _MODEL_CODE_RE.search(low) is not None
+    if ("model" in low or code) and (code or any(w in low for w in ("not found", "does not exist", "not supported", "unsupported", "invalid", "unknown"))):
         return "bad", "model"
     return "transient", ""
 
@@ -540,7 +553,7 @@ class CodexJudge:
             raise CallError("bad", "oserror") from None
         try:
             if p.returncode != 0:
-                kind, tag = _codex_error_kind(f"{p.stderr or ''}\n{p.stdout or ''}")
+                kind, tag = _codex_error_kind(p.stderr or "")
                 raise CallError(kind, tag or f"exit{p.returncode}")
             # 이번 호출이 새로 쓴 파일만 인정한다. 없거나 비었으면 판정 불가 (보류로 둔갑시키지 않는다)
             text = out.read_text(encoding="utf-8").strip() if out.exists() else ""
@@ -652,6 +665,7 @@ class RetryLog:
 
 def call_with_retry(judge, prompt: str, *, max_attempts: int, log: RetryLog, sleep: Callable[[float], None],
                     stop: threading.Event | None = None) -> tuple[CallResult, int]:
+    timeouts = 0
     for attempt in range(1, max_attempts + 1):
         try:
             return judge.call(prompt), attempt
@@ -659,7 +673,9 @@ def call_with_retry(judge, prompt: str, *, max_attempts: int, log: RetryLog, sle
             if stop is not None and stop.is_set():
                 raise Interrupted from None  # Ctrl+C로 끊은 호출의 실패는 재시도 기록(retries.log)에 넣지 않는다
             exc.attempts = attempt
-            last = attempt == max_attempts
+            if exc.status == "timeout":
+                timeouts += 1  # 시간 초과는 한 번에 몇 분씩 쓰므로 한 건에서 TIMEOUT_ATTEMPTS번이면 포기한다
+            last = attempt == max_attempts or timeouts >= TIMEOUT_ATTEMPTS
             if exc.kind != "transient":
                 log(judge.name, judge.model, exc.log_status, attempt, 0)
                 raise
@@ -758,10 +774,12 @@ def mixed_models_warning(name: str, path: Path) -> str | None:
     return f"경고: {name} 판정 파일에 요청 모델이 {len(models)}개 섞여 있습니다 ({', '.join(models)}). 한 실행 안에서 모델이 바뀐 흔적입니다."
 
 
-def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep: Callable[[float], None], fail_limit: int = CONSECUTIVE_FAIL_LIMIT, stop: threading.Event | None = None, on_row: Callable[[dict], None] | None = None) -> dict:
+def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep: Callable[[float], None], fail_limit: int = CONSECUTIVE_FAIL_LIMIT, stop: threading.Event | None = None, on_row: Callable[[dict], None] | None = None,
+              timeout_fail_limit: int = TIMEOUT_FAIL_LIMIT) -> dict:
     """items 중 아직 판정이 없거나 판정불가인 건만 돈다. 멈추면 이유를 돌려준다."""
     done = {k for k, r in load_rows(rows_path).items() if r["verdict"] != UNAVAILABLE}
     consecutive = 0
+    consecutive_timeouts = 0
     for it in items:
         if it.key in done:
             continue
@@ -786,10 +804,13 @@ def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep
                     return {"stopped": DAILY_QUOTA_MESSAGE}
                 return {"stopped": f"{exc.kind}:{exc.status}"}  # 인증, 설정 문제 → 이 면접관 멈춤
             consecutive += 1
+            consecutive_timeouts = consecutive_timeouts + 1 if exc.status == "timeout" else 0
+            if consecutive_timeouts >= timeout_fail_limit:
+                return {"stopped": f"연속 {timeout_fail_limit}건 시간 초과 (건당 {TIMEOUT_ATTEMPTS}번씩 호출)"}
             if consecutive >= fail_limit:
                 return {"stopped": f"연속 {fail_limit}건 실패 (마지막 {exc.status})"}
             continue
-        consecutive = 0
+        consecutive = consecutive_timeouts = 0
         data, err = parse_verdict(res.text)
         if data is None:
             # 형식 오류는 판정이 아니다: 보류로 굳히면 이어하기에서 다시 안 돌고, 보류는 3단계를 부른다. 판정불가로 두고 다시 돌린다
