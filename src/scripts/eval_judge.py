@@ -309,6 +309,10 @@ def debate_main(args) -> int:
         if result["interrupted"]:
             print(f"\n중단했습니다. 쓴 줄은 남아 있습니다. 이어서 하려면:\n  python -m src.scripts.eval_judge --debate {out_dir}")
             return 130
+        if result.get("incomplete"):  # 2라운드를 다 못 돈 면접관이 있다: 중재, 최종 확정, 보고서를 만들지 않았다
+            print("\n" + "\n".join(result["incomplete"]) + f"\n2라운드가 끝나지 않아 중재와 최종 확정은 하지 않았습니다. 쓴 줄은 남아 있습니다. "
+                  f"원인을 고친 뒤 이어서 하려면:\n  python -m src.scripts.eval_judge --debate {out_dir}", file=sys.stderr)
+            return 1
         write_report(out_dir, items, names)
         rebuild(out_dir)  # review.html, 사람이 볼 목록, progress.html에 토론 결과를 반영한다
         final = result["final"]

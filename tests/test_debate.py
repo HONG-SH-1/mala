@@ -362,7 +362,7 @@ def test_full_flow_unanimous_minority_won_and_conformity(tmp_path, corpus):
     arb_row = store.read_rows(store.ddir(folder) / store.ARBITER_FILE)[by["질문2"]]
     assert arb_row["verdict"] == "불합격" and arb_row["decisive"] and arb_row["model_reported"] == "arb-m-reported"
     cfg = store.load_config(folder)
-    assert cfg["ended"] is True and cfg["arbiter"] == {"judge": "claude", "model": "arb-m"} and len(cfg["candidates"]) == 3
+    assert cfg["ended"] is True and cfg["arbiter"] == {"judge": "claude", "model": "arb-m", "effort": None} and len(cfg["candidates"]) == 3
 
 
 def test_changed_is_computed_by_code_not_by_the_model(tmp_path, corpus):

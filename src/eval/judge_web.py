@@ -249,6 +249,8 @@ def build_data(out_dir: Path, items, ids: dict[str, str], names: list[str], info
             status, kind = f"토론 중 ({stage})", "running"
         elif debate.get("interrupted"):
             status, kind = "토론 멈춤 (Ctrl+C)", "stopped"
+        elif debate.get("incomplete"):  # 2라운드가 끝나지 않아 중재와 최종 확정을 하지 않았다
+            status, kind = f"토론 멈춤 ({str(debate['incomplete'][0])[:MAX_NOTE]})", "stopped"
         elif debate.get("ended"):
             status, kind = "토론 끝남", "done"
         else:

@@ -628,6 +628,60 @@ def _run_threads(targets: list[tuple[str, Callable[[], dict]]], stop: threading.
     return results
 
 
+def _effective_effort(name: str, effort: object) -> object:
+    return effort if name == "codex" else None  # effort는 codex만 쓴다 (claude, gemini 객체에는 없다)
+
+
+def debate_settings(judges: dict[str, object], arbiter: tuple[str, object], compare: tuple[str, object] | None) -> dict:
+    """이번 실행의 토론 설정: 2라운드 면접관 모델, 중재자(이름, 모델, effort), 비교 중재자. debate/config.json에 같은 모양으로 남긴다."""
+    def one(pair):
+        name, obj = pair
+        return {"judge": name, "model": getattr(obj, "model", None), "effort": _effective_effort(name, getattr(obj, "effort", None))}
+
+    return {"models": {n: getattr(j, "model", None) for n, j in judges.items()}, "arbiter": one(arbiter),
+            "compare": one(compare) if compare else None}
+
+
+def verify_resume_config(saved: dict | None, current: dict) -> list[str]:
+    """이어하기 때 debate/config.json에 남은 설정이 지금 설정과 같은지 본다.
+
+    다르면 SystemExit (config.json을 덮어쓰지 않는다. 우회 스위치 없음). 옛 config에 없는 키는 확인할 수 없으니 경고 문구만 돌려준다.
+    다른 설정으로 이어 하면 2라운드, 중재 결과에 모델이 섞이기 때문이다.
+    """
+    if not saved:
+        return []
+    diffs: list[str] = []
+    warns: list[str] = []
+
+    def cmp(label: str, old: object, new: object) -> None:
+        if old != new:
+            diffs.append(f"{label}: {old} → {new}")
+
+    if "models" not in saved or not isinstance(saved["models"], dict):
+        warns.append("이전 설정에 2라운드 면접관 모델 기록이 없어 확인하지 못했습니다")
+    else:
+        for n in dict.fromkeys([*saved["models"], *current["models"]]):
+            cmp(f"2라운드 면접관 {n} 모델", saved["models"].get(n, "(없음)"), current["models"].get(n, "(없음)"))
+    for key, label in (("arbiter", "중재자"), ("compare", "비교 중재자")):
+        if key not in saved:
+            warns.append(f"이전 설정에 {label} 기록이 없어 확인하지 못했습니다")
+            continue
+        old, new = saved[key], current[key]
+        if old is None or new is None or not isinstance(old, dict):
+            cmp(label, "없음" if old is None else old.get("judge"), "없음" if new is None else new["judge"])
+            continue
+        cmp(f"{label} 이름", old.get("judge"), new["judge"])
+        cmp(f"{label} 모델", old.get("model"), new["model"])
+        if "effort" not in old:
+            warns.append(f"이전 설정에 {label} effort 기록이 없어 확인하지 못했습니다")
+        else:
+            cmp(f"{label} effort", old["effort"], new["effort"])
+    if diffs:
+        raise SystemExit("토론 설정이 이전 실행(debate/config.json)과 다릅니다: " + "; ".join(diffs)
+                         + ". 다른 설정의 결과가 섞이지 않도록 멈춥니다. config.json은 고치지 않았습니다. 이전과 같은 설정으로 이어 하세요.")
+    return warns
+
+
 def run_debate(
     out_dir: Path,
     items,
@@ -645,7 +699,11 @@ def run_debate(
     page: Callable[[], None] | None = None,
     estimate_info: dict | None = None,
 ) -> dict:
-    """judges: {이름: 면접관 객체} (1라운드와 같은 모델로 만든 것). arbiter/compare: (이름, 객체). 결과 요약을 돌려준다."""
+    """judges: {이름: 면접관 객체} (1라운드와 같은 모델로 만든 것). arbiter/compare: (이름, 객체). 결과 요약을 돌려준다.
+
+    이어하기 때 debate/config.json의 설정이 지금 설정과 다르면 아무것도 쓰기 전에 SystemExit.
+    2라운드 면접관이 하나라도 끝까지 못 돌았으면(인증 실패 등) 중재와 최종 확정은 하지 않고 {"incomplete": [...]}를 돌려준다.
+    """
     stop = stop if stop is not None else threading.Event()
     raw_sleep = sleep if sleep is not None else (lambda secs: stop.wait(secs))
 
@@ -664,12 +722,14 @@ def run_debate(
     d = store.ddir(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     log = RetryLog(d / "retries.log", now)
-    cfg = store.load_config(out_dir) or {}
+    saved_cfg = store.load_config(out_dir)
+    settings = debate_settings(judges, arbiter, compare)
+    for warning in verify_resume_config(saved_cfg, settings):  # 다르면 여기서 SystemExit: 아래에서 config.json을 쓰기 전이다
+        out("경고: " + warning)
+    cfg = saved_cfg or {}
+    cfg.pop("incomplete", None)
     cfg.update({"version": 1, "judges": names, "candidates": groups["candidates"], "excluded": groups["excluded"],
-                "unrun": groups["unrun"], "models": {n: getattr(j, "model", None) for n, j in judges.items()},
-                "arbiter": {"judge": arbiter[0], "model": getattr(arbiter[1], "model", None)},
-                "compare": ({"judge": compare[0], "model": getattr(compare[1], "model", None), "effort": getattr(compare[1], "effort", None)}
-                            if compare else None),
+                "unrun": groups["unrun"], **settings,
                 "estimate": estimate_info, "stage": "round2", "ended": False, "interrupted": False, "started": cfg.get("started") or now().isoformat(timespec="seconds"),
                 "updated": now().isoformat(timespec="seconds")})
     store.write_config(out_dir, cfg)
@@ -702,6 +762,17 @@ def run_debate(
         cfg.update({"interrupted": True, "stage": "round2"})
         store.write_config(out_dir, cfg)
         return {"interrupted": True, "stopped": {n: r.get("stopped") for n, r in res.items()}}
+    incomplete = {n: r["stopped"] for n, r in res.items() if r.get("stopped")}
+    if incomplete:
+        # 2라운드를 다 못 돈 면접관이 있으면 그 면접관의 의견이 빠진 채로 중재, 확정을 하게 된다. 하지 않고 멈춘다.
+        # 이미 쓴 2라운드 줄은 그대로 두고, 이어하기에서 남은 건만 다시 돈다 (끝난 줄은 건너뛴다).
+        notes = [f"2라운드 미완료: {n}: {why}" for n, why in incomplete.items()]
+        cfg.update({"stage": "round2", "ended": False, "interrupted": False, "incomplete": notes, "stopped": incomplete,
+                    "updated": now().isoformat(timespec="seconds")})
+        store.write_config(out_dir, cfg)
+        for note in notes:
+            out(note)
+        return {"interrupted": False, "incomplete": notes, "stopped": incomplete}
 
     r2_rows = store.load_round2(out_dir)
     need: list[str] = []

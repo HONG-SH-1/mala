@@ -137,7 +137,8 @@ def test_refusal_reports_both_problems_per_file_and_names_only_bad_files(tmp_pat
     with pytest.raises(SystemExit) as ei:
         check_external_judges([good, bad], ["claude"])
     msg = str(ei.value)
-    assert "bad-run" in msg and "ok-run" not in msg and "컬렉션 mala_vault" in msg and "볼트 경로 D:/vault" in msg
+    assert "bad-run" in msg and "ok-run" not in msg and "컬렉션 mala_vault" in msg  # 컬렉션 이름은 그대로 보여 준다
+    assert "볼트 경로가 data/eval_corpus/ 밖" in msg and "D:/vault" not in msg  # 볼트 경로 원문은 넣지 않는다
 
 
 def test_committed_baseline_results_still_pass_for_every_judge():

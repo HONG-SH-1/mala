@@ -542,10 +542,11 @@ def codex_tool_item_types(stdout: str) -> list[str]:
 
 
 def codex_failure_text(stderr: str, stdout: str) -> str:
-    """실패한 Codex 호출에서 오류를 분류할 글: stderr + stdout 이벤트 중 type이 error, turn.failed인 줄의 message.
+    """실패한 Codex 호출에서 오류를 분류할 글.
 
-    turn.failed가 있으면 그것을 우선한다 (중간의 재연결 알림 "Reconnecting... (401 ...)"이 아니라 끝내 실패한 이유).
-    agent_message 같은 모델이 쓴 글은 보지 않는다.
+    stdout 이벤트에 turn.failed(message가 있는 것)가 있으면 그 message만 쓴다. 끝내 실패한 이유가 그것이고, 중간의 재연결 알림
+    "Reconnecting... (401 ...)"이나 stderr에 남은 옛 글자가 분류를 바꾸면 안 된다.
+    turn.failed가 없을 때만 stderr + type이 error인 줄의 message를 쓴다. agent_message 같은 모델이 쓴 글은 보지 않는다.
     """
     failed: list[str] = []
     errors: list[str] = []
@@ -561,7 +562,9 @@ def codex_failure_text(stderr: str, stdout: str) -> str:
             continue
         if isinstance(msg, str):
             bucket.append(msg)
-    return "\n".join([stderr or "", *(failed or errors)])
+    if failed:
+        return "\n".join(failed)
+    return "\n".join([stderr or "", *errors])
 
 
 _TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")

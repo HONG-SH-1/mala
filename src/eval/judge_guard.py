@@ -162,9 +162,9 @@ def check_external_judges(files: list[str], judge_names: list[str], root: Path |
             problems.append(f"{Path(f).name}: 컬렉션 이름을 찾지 못함 (짝 .md에 '컬렉션:' 줄이 없음)")
         elif not all(n.startswith(ALLOWED_PREFIX) for n in names):
             problems.append(f"{Path(f).name}: 컬렉션 {', '.join(names)} (허용: {ALLOWED_PREFIX}...)")
-        bad_vaults = [v for v in vaults_of(f, root) if not vault_is_allowed(v, root)]
-        if bad_vaults:
-            problems.append(f"{Path(f).name}: 볼트 경로 {', '.join(bad_vaults)} (허용: {ALLOWED_VAULT_DIR}/ 안)")
+        if any(not vault_is_allowed(v, root) for v in vaults_of(f, root)):
+            # 경로 원문은 메시지에 넣지 않는다 (진짜 볼트의 위치가 터미널, 로그에 남지 않게). 파일 이름과 이유만
+            problems.append(f"{Path(f).name}: 볼트 경로가 {ALLOWED_VAULT_DIR}/ 밖이거나 확인할 수 없음")
     if problems:
         raise SystemExit(
             f"{', '.join(external)} 실행을 거부합니다. 공개 문서 컬렉션이 아니거나 출처를 확인할 수 없는 결과가 있습니다:\n  "
