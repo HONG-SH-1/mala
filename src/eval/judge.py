@@ -28,6 +28,7 @@ from typing import Callable
 import httpx
 
 from src.eval.runner import Question
+from src.eval import debate_store as dstore
 from src.eval.judge_human import atomic_write_text, criteria_section, human_section, load_criteria, load_human
 from src.eval.judge_report import write_review_html
 from src.eval.judge_web import ProgressPage, count_retries, write_summary_html
@@ -797,6 +798,7 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
     rows = {n: load_rows(out_dir / f"judge_{n}.jsonl") for n in active}
     # 어떤 면접관이든 판정 줄이 없는 건은 아직 안 돌린 건이다 (실패해서 판정불가로 남은 건과 다르다): 사람이 볼 목록에서 뺀다
     remaining = {it.key for it in items if any(it.key not in rows[n] for n in active)}
+    deb_final = dstore.load_final(out_dir)  # 토론(ADR-006) 결과가 있으면 사람이 볼 목록 사유에 반영한다 (원본 판정 파일은 그대로)
 
     def verdict_of(name: str, it: Item) -> str:
         r = rows[name].get(it.key)
@@ -814,16 +816,24 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
         vs = {n: verdict_of(n, it) for n in active}
         decision, note = decide(vs) if vs else (UNDECIDED, "면접관 없음")
         reasons: list[str] = []
-        if "합격" in vs.values() and "불합격" in vs.values():
-            reasons.append("면접관끼리 엇갈림")
-        if any(v == "보류" for v in vs.values()):
-            reasons.append("보류 있음")
-        if any(v == UNAVAILABLE for v in vs.values()):
-            reasons.append("판정 불가 있음")
-        if decision == UNDECIDED and not reasons:
-            reasons.append("다수결이 나오지 않음")
-        if it.auto_correct is not None and decision in ("합격", "불합격") and (decision == "합격") != it.auto_correct:
-            reasons.append("키워드 자동 판정과 다름")
+        dfin = deb_final.get(it.key)
+        if dfin and dfin.get("path") in dstore.RESOLVED:
+            # 토론을 거친 건: 갈림, 보류 사유는 토론 결과로 바꾼다. 소수가 이긴 건과 끝까지 갈린 건만 목록에 남는다
+            reasons.extend(dfin.get("reasons") or [])
+            fv = dfin.get("final")
+            if it.auto_correct is not None and fv in ("합격", "불합격") and (fv == "합격") != it.auto_correct:
+                reasons.append("키워드 자동 판정과 다름")
+        else:
+            if "합격" in vs.values() and "불합격" in vs.values():
+                reasons.append("면접관끼리 엇갈림")
+            if any(v == "보류" for v in vs.values()):
+                reasons.append("보류 있음")
+            if any(v == UNAVAILABLE for v in vs.values()):
+                reasons.append("판정 불가 있음")
+            if decision == UNDECIDED and not reasons:
+                reasons.append("다수결이 나오지 않음")
+            if it.auto_correct is not None and decision in ("합격", "불합격") and (decision == "합격") != it.auto_correct:
+                reasons.append("키워드 자동 판정과 다름")
         maj.append({"key": it.key, "label": it.label, "id": it.qid, "repeat": it.repeat, "verdicts": vs,
                     "majority": decision, "note": note, "auto_correct": it.auto_correct, "correct": it.correct,
                     "review": bool(reasons)})
@@ -853,6 +863,9 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
     # 결과 보기 화면: 라벨, key, 파일 이름은 넣지 않는다
     flagged_info = {it.key: reasons for it, _vs, reasons in flagged}
     maj_by_key = {m["key"]: m for m in maj}
+    deb_r2 = dstore.load_round2(out_dir)
+    deb_arb = dstore.read_rows(dstore.ddir(out_dir) / dstore.ARBITER_FILE)
+    deb_cmp = dstore.read_rows(dstore.ddir(out_dir) / dstore.COMPARE_FILE)
     records = []
     for it in items:
         m = maj_by_key[it.key]
@@ -872,6 +885,7 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
             "majority": m["majority"], "note": m["note"], "auto_correct": it.auto_correct, "correct": it.correct,
             "final_source": "none" if it.correct is None else ("manual" if it.manual_correct is not None else "auto"),
             "review": m["review"], "reasons": flagged_info.get(it.key, []),
+            "debate": _debate_record(it.key, deb_final.get(it.key), deb_r2, deb_arb.get(it.key), deb_cmp.get(it.key), rows, active),
         })
     write_review_html(out_dir, out_dir.name, seed, records, list(active))
 
@@ -880,6 +894,34 @@ def finalize(out_dir: Path, items: list[Item], state: dict, seed: int, retries: 
     (out_dir / "summary.md").write_text(summary, encoding="utf-8")
     write_summary_html(out_dir, summary)  # summary.md와 같은 내용을 브라우저용으로 (md는 그대로 둔다)
     return summary
+
+
+def _debate_record(key: str, fin: dict | None, r2: dict, arb: dict | None, cmp_: dict | None, rows: dict, active: list[str]) -> dict | None:
+    """review.html에 넣을 토론 기록. 토론 결과가 확정된 건만. 모델이 쓴 글은 화면에서 textContent로만 넣는다."""
+    if not fin or fin.get("path") not in dstore.RESOLVED:
+        return None
+    rounds = {}
+    for n in active:
+        a = rows[n].get(key) or {}
+        b = (r2.get(n) or {}).get(key) or {}
+        rounds[n] = {
+            "r1": {"verdict": a.get("verdict"), "cause": a.get("cause"), "reason": a.get("reason")},
+            "r2": {"verdict": b.get("verdict"), "cause": b.get("cause"), "reason": b.get("reason"), "changed": bool(b.get("changed")),
+                   "carried": bool(b.get("carried")), "status": b.get("status"),
+                   "citations": [{k: c.get(k) for k in ("file", "line", "quote", "status", "valid", "matched_line")} for c in b.get("citations") or []]}
+            if b else None,
+        }
+
+    def arb_view(r: dict | None) -> dict | None:
+        if not r:
+            return None
+        return {"verdict": r.get("verdict"), "reason": r.get("reason"), "follows": r.get("follows") or [], "decisive": r.get("decisive") or [],
+                "label_map": r.get("label_map") or {}, "status": r.get("status"), "model": r.get("model_reported") or r.get("model_requested"),
+                "citations": r.get("citations") or {}}
+
+    return {"path": fin["path"], "path_text": dstore.PATHS.get(fin["path"], fin["path"]), "final": fin.get("final"),
+            "majority_r1": fin.get("majority_r1"), "effective": fin.get("effective") or {}, "ignored": fin.get("ignored_changes") or [],
+            "rounds": rounds, "arbiter": arb_view(arb), "compare": arb_view(cmp_)}
 
 
 def _repeat_table(items, active, rows, maj) -> list[str]:

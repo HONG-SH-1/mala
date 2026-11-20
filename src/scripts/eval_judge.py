@@ -12,6 +12,10 @@
     # 진행 줄에서 판정과 (갈림)을 숨기고 진행 수와 예상 시간만
     python -m src.scripts.eval_judge ... --blind
 
+    # 갈리거나 보류가 있는 건만 토론 (2라운드 + 중재). 기존 실행 폴더의 판정을 1라운드로 쓴다 (ADR-006)
+    python -m src.scripts.eval_judge --debate data/eval/judge/<실행폴더> --dry-run
+    python -m src.scripts.eval_judge --debate data/eval/judge/<실행폴더> [--arbiter claude:sonnet] [--arbiter-compare] [--blind] [--yes]
+
     # 판정 호출 없이 review.md, review.html, summary.md 다시 만들기
     python -m src.scripts.eval_judge --rebuild data/eval/judge/<실행폴더>
 
@@ -41,6 +45,7 @@ from src.eval.judge import (
     GeminiJudge,
     JudgeSpec,
     RateLimiter,
+    load_rows,
     build_items,
     ensure_blind_map,
     execute,
@@ -53,7 +58,7 @@ from src.eval.judge import (
 from src.eval.judge_guard import check_external_judges
 from src.eval.judge_human import HumanImportError, atomic_write_text, import_human
 from src.eval.judge_progress import Progress, load_history
-from src.eval.judge_web import write_static
+from src.eval.judge_web import write_debate_page, write_static
 from src.eval.runner import load_questions
 from src.keystore import GEMINI_ENTRY, KeystoreError, check_gemini_key_shape, get_secret, redact
 from src.scripts.eval_rescore import load_records
@@ -156,6 +161,129 @@ def rebuild(out_dir: Path) -> str:
     return summary
 
 
+DEFAULT_ARBITER = ("claude", "sonnet")
+DEFAULT_ARBITER_EFFORT = "medium"
+
+
+def resolve_arbiter(cli_value: str | None, env, state_models: dict) -> tuple[str, str | None, str]:
+    """중재 모델 설정: 명령줄 `이름[:모델]` > .env의 ARBITER_JUDGE, ARBITER_MODEL, ARBITER_EFFORT > 기본(claude sonnet).
+    codex 중재의 effort는 기본 medium. 모델을 안 정한 codex, gemini는 1라운드에 쓴 모델을 쓴다."""
+    name, model = DEFAULT_ARBITER
+    env_name = (env.get("ARBITER_JUDGE") or "").strip()
+    env_model = (env.get("ARBITER_MODEL") or "").strip()
+    if env_name:
+        name, model = env_name, env_model or None
+    elif env_model:
+        model = env_model
+    if cli_value:
+        name, _, m = cli_value.partition(":")
+        model = m.strip() or None
+    name = name.strip()
+    if name not in JUDGE_NAMES:
+        raise SystemExit(f"중재 면접관은 {JUDGE_NAMES} 중에서 고르세요: {name}")
+    if name == "claude":
+        model = model or "sonnet"
+    else:
+        model = model or state_models.get(name)
+    effort = (env.get("ARBITER_EFFORT") or "").strip() or DEFAULT_ARBITER_EFFORT
+    return name, model, effort
+
+
+def compare_arbiter(primary: str, state_models: dict, env=None) -> tuple[str, str | None, str]:
+    """다른 계열 중재자: claude이면 codex(effort medium), 그 밖이면 claude sonnet. 계열 편향을 보려는 비교용이다."""
+    if primary == "claude":
+        models = _env_list("CODEX_JUDGE_MODELS")
+        return "codex", state_models.get("codex") or (models[0] if models else None), DEFAULT_ARBITER_EFFORT
+    return "claude", "sonnet", DEFAULT_ARBITER_EFFORT
+
+
+def debate_main(args) -> int:
+    from src.eval.debate import estimate, format_estimate, run_debate, select_candidates
+    from src.eval.debate_report import write_report
+
+    out_dir = Path(args.debate)
+    items, state, meta = load_folder(out_dir)
+    names = [n for n in JUDGE_NAMES if state["judges"].get(n, {}).get("status") not in (None, "skipped")]
+    if len(names) < 3:
+        print(f"토론은 면접관 3명의 1라운드 판정이 필요합니다 (지금: {', '.join(names) or '없음'}).", file=sys.stderr)
+        return 1
+    r1 = {n: load_rows(out_dir / f"judge_{n}.jsonl") for n in names}
+    groups = select_candidates(items, r1, names)
+    models = {n: state["judges"][n].get("model") for n in names}
+    load_dotenv(_ROOT / ".env")
+    arb = resolve_arbiter(args.arbiter, os.environ, models)
+    cmp_ = compare_arbiter(arb[0], models, os.environ) if args.arbiter_compare else None
+    # 안전장치: 키를 꺼내기 전에 입력의 출처를 본다 (외부 면접관은 mala_eval_docs 결과만)
+    check_external_judges(list(meta["files"]), names + [arb[0]] + ([cmp_[0]] if cmp_ else []), _ROOT)
+    rpm = resolve_gemini_rpm(args.gemini_rpm, os.environ.get("GEMINI_JUDGE_RPM"))
+    est = estimate(items, groups, r1, names, gemini_rpm=rpm, arbiter_names=[arb[0]] + ([cmp_[0]] if cmp_ else []))
+    desc = f"중재: {arb[0]} {arb[1] or '(기본 모델)'}" + (f" (effort {arb[2]})" if arb[0] == "codex" else "")
+    if cmp_:
+        desc += f" / 비교 중재: {cmp_[0]} {cmp_[1] or '(기본 모델)'}" + (f" (effort {cmp_[2]})" if cmp_[0] == "codex" else "")
+    print(format_estimate(est) + "\n" + desc, flush=True)
+    if args.dry_run:
+        print("(--dry-run: 호출하지 않았습니다)")
+        return 0
+    if not groups["candidates"]:
+        print("토론할 건이 없습니다.")
+        return 0
+    if not args.yes:
+        try:
+            ok = input("계속할까요? [y/N] ").strip().lower() in ("y", "yes")
+        except EOFError:
+            ok = False
+        if not ok:
+            print("취소했습니다. 아무것도 호출하지 않았습니다.")
+            return 1
+    workdir = resolve_workdir(os.environ.get("JUDGE_WORKDIR"))
+    secrets: list = []
+    try:
+        need = list(names)
+        for extra in [arb[0]] + ([cmp_[0]] if cmp_ else []):
+            if extra == "gemini" and "gemini" not in need:
+                need.append("gemini")
+        specs, secrets = _build_specs(need, workdir, rpm)
+        by_name = {sp.name: sp for sp in specs}
+        bad = [n for n in need if by_name[n].unavailable]
+        if bad:
+            print("쓸 수 없는 면접관: " + ", ".join(f"{n} ({by_name[n].unavailable})" for n in bad), file=sys.stderr)
+            return 1
+        judges = {n: by_name[n].make(models.get(n)) for n in names}
+
+        def make_arb(cfg):
+            name, model, eff = cfg
+            if name == "claude":
+                return ClaudeJudge(workdir, model=model or "sonnet")
+            if name == "codex":
+                return CodexJudge(workdir, str(model), eff)
+            return by_name["gemini"].make(model)
+
+        stop = threading.Event()
+        ids = ensure_blind_map(out_dir, items)
+        run_state = dict(state)
+        run_state["blind"] = bool(args.blind or state.get("blind", True))
+
+        def page() -> None:
+            write_debate_page(out_dir, items, ids, run_state, running=True)
+
+        result = run_debate(out_dir, items, state, judges=judges, arbiter=(arb[0], make_arb(arb)),
+                            compare=((cmp_[0], make_arb(cmp_)) if cmp_ else None), stop=stop, blind=run_state["blind"], page=page,
+                            estimate_info=est)
+        write_debate_page(out_dir, items, ids, run_state, running=False)
+        if result["interrupted"]:
+            print(f"\n중단했습니다. 쓴 줄은 남아 있습니다. 이어서 하려면:\n  python -m src.scripts.eval_judge --debate {out_dir}")
+            return 130
+        write_report(out_dir, items, names)
+        rebuild(out_dir)  # review.html, 사람이 볼 목록, progress.html에 토론 결과를 반영한다
+        final = result["final"]
+        print(f"토론이 끝났습니다. 소수가 이긴 건 {sum(1 for f in final if f['minority_won'])}, 끝까지 갈린 건 {sum(1 for f in final if f['unresolved'])}")
+        print(f"보고서: {out_dir / 'debate' / 'report.md'}\n결과 보기 화면: {out_dir / 'review.html'}")
+        return 0
+    except Exception as exc:  # 어떤 오류든 키가 섞여 나가지 않게 한 번 더 거른다
+        print(f"오류: {redact(f'{type(exc).__name__}: {exc}', *secrets)}", file=sys.stderr)
+        return 1
+
+
 def folder_problem(raw: str, *, need_run_files: bool = True) -> str | None:
     """실행 폴더로 쓸 수 없으면 짧은 안내 문구, 쓸 수 있으면 None (OSError 대신 보여 준다)."""
     p = Path(raw)
@@ -190,6 +318,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tag", default="")
     ap.add_argument("--blind", action="store_true", help="진행 줄에서 판정과 (갈림)을 숨기고 진행 수와 예상 시간만 보여 준다")
     ap.add_argument("--open", action="store_true", help="시작할 때 progress.html을 기본 브라우저로 연다 (실행 중 진행 상황, 5초마다 새로 고침)")
+    ap.add_argument("--debate", default=None, metavar="실행폴더", help="갈리거나 보류가 있는 건만 토론한다 (2라운드 + 중재). 그 폴더의 판정이 1라운드")
+    ap.add_argument("--dry-run", action="store_true", help="--debate: 호출하지 않고 대상 건 수와 예상 호출 수, 토큰만 보여 준다")
+    ap.add_argument("--yes", action="store_true", help="--debate: 시작 확인 질문을 생략한다")
+    ap.add_argument("--arbiter", default=None, metavar="이름[:모델]", help="--debate: 중재 면접관 (기본 claude:sonnet, 또는 .env의 ARBITER_JUDGE, ARBITER_MODEL)")
+    ap.add_argument("--arbiter-compare", action="store_true", help="--debate: 다른 계열 중재자(claude↔codex medium)로도 돌려 결정이 달라지는지 비교한다 (결정에는 안 씀)")
     ap.add_argument("--rebuild", default=None, metavar="실행폴더", help="판정 호출 없이 review.md, review.html, summary.md를 다시 만든다")
     ap.add_argument("--import-human", nargs=2, default=None, metavar=("실행폴더", "내보낸.json"),
                     help="review.html에서 내보낸 내 판정을 human.jsonl에 합치고 요약을 다시 만든다")
@@ -205,9 +338,13 @@ def main(argv: list[str] | None = None) -> int:
             problem = f"파일이 없습니다: {args.import_human[1]}"
     elif args.resume:
         problem = folder_problem(args.resume)
+    elif args.debate:
+        problem = folder_problem(args.debate)
     if problem:
         print(problem, file=sys.stderr)
         return 1
+    if args.debate:
+        return debate_main(args)
 
     if args.rebuild or args.import_human:  # 면접관을 부르지 않는 작업: 작업 폴더, 키가 필요 없다
         try:

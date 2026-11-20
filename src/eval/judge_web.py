@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from src.eval import debate_store
 from src.eval.judge_human import atomic_write_text
 from src.eval.judge_report import csp_hash
 from src.eval.md_mini import parse_markdown
@@ -115,17 +116,37 @@ def _vcls(v: str) -> str:
     return "pass" if v == "합격" else "fail" if v == "불합격" else "hold"
 
 
-def nav_html(current: str, available: set[str] | None = None) -> str:
+def nav_html(current: str, available: set[str] | None = None, prefix: str = "") -> str:
     """세 화면 맨 위의 이동 줄. 같은 폴더 상대 링크. 아직 없는 파일은 링크 없이 흐리게."""
     parts = []
     for fname, label in NAV:
         if fname == current:
             parts.append(f"<b>{esc(label)}</b>")
         elif available is None or fname in available:
-            parts.append(f'<a href="{fname}">{esc(label)}</a>')
+            parts.append(f'<a href="{prefix}{fname}">{esc(label)}</a>')
         else:
             parts.append(f'<span class="off">{esc(label)}</span>')
     return '<nav class="nav">' + "".join(parts) + "</nav>"
+
+
+def render_debate(deb: dict, names: list[str], blind: bool) -> str:
+    stage = {"round2": "2라운드", "arbiter": "중재"}.get(deb.get("stage"), "끝")
+    out = ['<div class="card"><h2>토론 (ADR-006)</h2>',
+           f'<div>단계: <b>{esc(stage)}</b> · 토론 대상 {int(deb["candidates"])}건</div>', "<table><tr><th>면접관</th><th>2라운드</th></tr>"]
+    for j, n in (deb.get("per_judge") or {}).items():
+        out.append(f"<tr><td>{esc(j)}</td><td>{int(n)}/{int(deb['candidates'])}</td></tr>")
+    out.append("</table>")
+    need = deb.get("needs_arbiter")
+    out.append(f'<div>중재 {int(deb["arbiter_done"])}/{esc(need if need is not None else "?")}</div>')
+    if not blind:
+        out.append(f'<div>판정을 바꾼 횟수 {int(deb["changed"])}</div>')
+    out.append(f'<div>인용 확인됨 {int(deb["citations_valid"])} · 무효 {int(deb["citations_invalid"])}</div>')
+    if deb.get("has_report"):
+        out.append('<div class="links"><a href="debate/report.html">토론 보고서 (debate/report.html)</a></div>')
+    elif deb.get("ended"):
+        out.append('<div class="muted">보고서는 아직 없음</div>')
+    out.append("</div>")
+    return "\n".join(out)
 
 
 def render(data: dict) -> str:
@@ -180,6 +201,9 @@ def render(data: dict) -> str:
         if data["blind"]:
             body.append('<div class="note">--blind: 면접관별 결과는 이 화면에 넣지 않았습니다.</div>')
     body.append("</div>")
+    deb = data.get("debate")
+    if deb:
+        body.append(render_debate(deb, names, data["blind"]))
     body.append(f'<div class="foot">결과 폴더 {esc(data["run"])} · 시작 {esc(data["started"])}</div>')
 
     tpl = TEMPLATE.read_text(encoding="utf-8")
@@ -197,7 +221,8 @@ def _mtime_text(ts: datetime) -> str:
 
 def build_data(out_dir: Path, items, ids: dict[str, str], names: list[str], infos: dict[str, dict], *, phase: str,
                interrupted: bool, killed: bool, blind: bool, retries: int, started: str, stamp: datetime,
-               eta: str = "계산 중", order: list[str] | None = None, expect_outputs: bool = False) -> dict:
+               eta: str = "계산 중", order: list[str] | None = None, expect_outputs: bool = False,
+               debate: dict | None = None) -> dict:
     # 건너뜀은 시작도 못 한 면접관에게만 쓴다. 판정 줄이 있으면 멈춤으로 본다 (예전 기록 보정)
     infos = {n: dict(i) for n, i in infos.items()}
     for n, i in infos.items():
@@ -218,10 +243,20 @@ def build_data(out_dir: Path, items, ids: dict[str, str], names: list[str], info
             j["label"] = "멈춤 (강제 종료)" if j["done"] else "시작 기록 없음"
         else:
             j["label"] = judge_label(infos.get(n))
+    if debate:  # 토론(ADR-006) 화면: 상태 문구를 토론 기준으로
+        stage = {"round2": "2라운드", "arbiter": "중재"}.get(debate.get("stage"), "마무리")
+        if phase == "running":
+            status, kind = f"토론 중 ({stage})", "running"
+        elif debate.get("interrupted"):
+            status, kind = "토론 멈춤 (Ctrl+C)", "stopped"
+        elif debate.get("ended"):
+            status, kind = "토론 끝남", "done"
+        else:
+            status, kind = "토론 멈춤 (강제 종료로 보임)", "stopped"
     links = kind != "running" and (expect_outputs or ((out_dir / "review.html").is_file() and (out_dir / SUMMARY_HTML).is_file()))
     return {"run": out_dir.name, "phase": phase, "status": status, "kind": kind, "stamp": _mtime_text(stamp),
             "total": snap["total"], "completed": snap["completed"], "eta": eta, "retries": retries, "judges": snap["judges"],
-            "recent": snap["recent"], "blind": blind, "started": started or "-", "links": links}
+            "recent": snap["recent"], "blind": blind, "started": started or "-", "links": links, "debate": debate}
 
 
 def write_page(out_dir: Path, data: dict) -> Path:
@@ -261,7 +296,19 @@ def write_static(out_dir: Path, items, ids: dict[str, str], state: dict, *, now:
     names = discover_judges(out_dir, list(infos))
     data = build_data(out_dir, items, ids, names, infos, phase="ended", interrupted=bool(state.get("interrupted")),
                       killed=state.get("ended") is False, blind=bool(state.get("blind", True)),
-                      retries=count_retries(out_dir), started=str(state.get("started") or ""), stamp=now())
+                      retries=count_retries(out_dir), started=str(state.get("started") or ""), stamp=now(),
+                      debate=debate_store.summarize(out_dir))
+    return write_page(out_dir, data)
+
+
+def write_debate_page(out_dir: Path, items, ids: dict[str, str], state: dict, *, running: bool,
+                      now: Callable[[], datetime] = datetime.now) -> Path:
+    """토론 중(running)이거나 끝난 뒤의 progress.html. 1라운드 표는 판정 파일에서, 토론 구역은 debate/ 기록에서 만든다."""
+    infos = {n: dict(i) for n, i in (state.get("judges") or {}).items()}
+    names = discover_judges(out_dir, list(infos))
+    data = build_data(out_dir, items, ids, names, infos, phase="running" if running else "ended", interrupted=False, killed=False,
+                      blind=bool(state.get("blind", True)), retries=count_retries(out_dir), started=str(state.get("started") or ""),
+                      stamp=now(), expect_outputs=True, debate=debate_store.summarize(out_dir))
     return write_page(out_dir, data)
 
 
@@ -354,3 +401,14 @@ def write_summary_html(out_dir: Path, md_text: str) -> Path:
     path = out_dir / SUMMARY_HTML
     atomic_write_text(path, render_summary_html(md_text, out_dir))
     return path
+
+
+def render_page(title: str, body: str, refresh: bool = False) -> str:
+    """같은 틀(CSP, 스타일)로 본문만 바꿔 끼운 정적 페이지 (요약, 토론 보고서)."""
+    tpl = TEMPLATE.read_text(encoding="utf-8")
+    style = _STYLE_RE.search(tpl)
+    if not style:
+        raise ValueError("템플릿에 <style> 블록이 없습니다.")
+    meta = f'<meta http-equiv="refresh" content="{int(PROGRESS_PAGE_SECONDS)}">\n' if refresh else ""
+    return (tpl.replace("__STYLE_HASH__", csp_hash(style.group(1))).replace("__REFRESH__", meta)
+            .replace("__TITLE__", esc(title)).replace("__BODY__", body))

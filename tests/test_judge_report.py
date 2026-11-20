@@ -127,7 +127,7 @@ def test_label_key_filenames_and_blind_map_are_not_in_html(tmp_path):
     d = data_of(html)
     for rec in d["items"]:
         assert set(rec) == {"bid", "qid", "repeat", "qtype", "question", "must_include", "expected_sources", "retrieved_sources", "answer", "judges",
-                            "majority", "note", "auto_correct", "correct", "final_source", "review", "reasons"}
+                            "majority", "note", "auto_correct", "correct", "final_source", "review", "reasons", "debate"}
 
 
 def test_hostile_answer_cannot_break_out_of_data_block(tmp_path):

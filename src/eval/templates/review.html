@@ -273,6 +273,9 @@ textarea { width: 100%; min-height: 90px; font: 12px/1.4 ui-monospace, Consolas,
     if (!revealed(it)) return true;
     if (S.filter === "split" && !isSplit(it)) return false;
     if (S.filter === "differ" && !differsFromFinal(it.majority, it.correct)) return false;
+    if (S.filter === "debated" && !it.debate) return false;
+    if (S.filter === "minority" && !(it.debate && (it.debate.path === "arbiter_minority_won" || it.debate.path === "arbiter_no_plurality"))) return false;
+    if (S.filter === "unresolved" && !(it.debate && (it.debate.path === "unresolved" || it.debate.path === "override_without_evidence"))) return false;
     if (S.judge) {
       var jr = it.judges[S.judge];
       if (!jr || !differsFromFinal(jr.verdict, it.correct)) return false;
@@ -483,6 +486,57 @@ textarea { width: 100%; min-height: 90px; font: 12px/1.4 ui-monospace, Consolas,
     fin.appendChild(el("span", "muted", fromText));
     box.appendChild(fin);
     if (it.reasons && it.reasons.length) box.appendChild(el("div", "muted", "볼 이유: " + it.reasons.join(", ")));
+    if (it.debate) box.appendChild(debateNode(it));
+    return box;
+  }
+
+  // ---- 토론(ADR-006): 라운드별 판정, 이유, 인용과 확인 결과. 모델이 쓴 글은 textContent로만 ----
+  var CITE_STATUS = { ok: "확인됨", wrong_line: "줄 번호만 틀림", not_found: "문서에 없는 문장", file_not_provided: "보여 주지 않은 문서",
+                      out_of_range: "보여 주지 않은 줄", too_short: "너무 짧음", ellipsis: "줄임표 사용", bad_format: "형식 오류" };
+  function citeLine(c) {
+    var row = el("div", c.valid ? "pass" : "fail");
+    var st = CITE_STATUS[c.status] || String(c.status);
+    if (c.status === "wrong_line" && c.matched_line) st += " (실제로는 " + c.matched_line + "줄)";
+    row.appendChild(el("span", "", (c.valid ? "✓ " : "✗ ") + st + " · "));
+    row.appendChild(el("span", "muted", c.file + " " + c.line + "줄: " + c.quote));
+    return row;
+  }
+  function debateNode(it) {
+    var d = it.debate;
+    var box = el("div", "crit");
+    box.appendChild(el("h3", "", "토론: " + d.path_text));
+    box.appendChild(el("div", "muted", "1라운드 다수결 " + d.majority_r1 + " → 토론 후 " + d.final));
+    DATA.judges.forEach(function (j) {
+      var r = d.rounds[j];
+      if (!r) return;
+      var one = el("div", "sec");
+      one.appendChild(el("strong", "", j));
+      one.appendChild(el("div", "", "1라운드 " + r.r1.verdict + (r.r1.reason ? " — " + r.r1.reason : "")));
+      if (!r.r2) { one.appendChild(el("div", "muted", "2라운드 기록 없음")); box.appendChild(one); return; }
+      var tag = (r.r2.changed ? " (판정 바꿈)" : "") + (r.r2.carried ? " (2라운드 형식 오류·실패: 1라운드 판정 유지)" : "");
+      one.appendChild(el("div", "", "2라운드 " + r.r2.verdict + tag + (r.r2.reason ? " — " + r.r2.reason : "")));
+      if (d.ignored.indexOf(j) >= 0) one.appendChild(el("div", "hold", "확인된 인용 없이 판정을 바꿔서 결정에는 반영하지 않았습니다 (1라운드 판정 유지)."));
+      if (!r.r2.citations.length) one.appendChild(el("div", "muted", it.qtype === "not_in_notes" ? "인용 없음 (근거 없음)" : "인용 없음"));
+      r.r2.citations.forEach(function (c) { one.appendChild(citeLine(c)); });
+      box.appendChild(one);
+    });
+    function arbNode(a, title) {
+      var n = el("div", "sec");
+      n.appendChild(el("strong", "", title + (a.model ? " (" + a.model + ")" : "")));
+      if (a.status !== "ok") { n.appendChild(el("div", "muted", "결과 없음 (" + String(a.status) + ")")); return n; }
+      n.appendChild(el("div", "", "판정 " + a.verdict + " — " + (a.reason || "")));
+      var ids = a.decisive || [];
+      if (ids.length) {
+        n.appendChild(el("div", "muted", "결정적 근거로 쓴 확인된 인용:"));
+        ids.forEach(function (id) {
+          var c = a.citations[id];
+          if (c) n.appendChild(el("div", "", id + " · " + c.file + " " + c.line + "줄: " + c.quote));
+        });
+      } else n.appendChild(el("div", "muted", "결정적 근거로 쓴 인용 없음"));
+      return n;
+    }
+    if (d.arbiter) box.appendChild(arbNode(d.arbiter, "중재"));
+    if (d.compare) box.appendChild(arbNode(d.compare, "비교 중재 (계열 편향 확인용, 결정에는 안 씀)"));
     return box;
   }
 
@@ -645,7 +699,9 @@ textarea { width: 100%; min-height: 90px; font: 12px/1.4 ui-monospace, Consolas,
   function renderView(app) {
     var bar = el("div", "card");
     var row = el("div", "bar");
-    [["all", "전체"], ["review", "사람이 볼 건"], ["split", "의견이 갈린 건"], ["differ", "최종과 다른 건"]].forEach(function (f) {
+    [["all", "전체"], ["review", "사람이 볼 건"], ["split", "의견이 갈린 건"], ["differ", "최종과 다른 건"]]
+      .concat(DATA.items.some(function (x) { return x.debate; }) ? [["debated", "토론 거친 건"], ["minority", "소수가 이긴 건"], ["unresolved", "끝까지 갈린 건"]] : [])
+      .forEach(function (f) {
       var b = el("button", S.filter === f[0] ? "on" : "", f[1]);
       b.type = "button";
       b.addEventListener("click", function () { S.filter = f[0]; render(); });
