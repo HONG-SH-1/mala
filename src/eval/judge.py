@@ -168,7 +168,8 @@ class CallResult:
 
 class CallError(Exception):
     """kind: transient(재시도) | auth(401/403, 멈춤) | bad(400/404 등, 멈춤. 시작 확인에서는 다음 모델)
-    | daily(하루 한도, 재시도 없이 멈춤). detail은 로그에 같이 남길 한도 식별자(본문 나머지는 버린다)."""
+    | daily(하루 한도, 재시도 없이 멈춤) | tool(도구를 껐는데 도구 호출이 있었음: 재시도 없이 그 건만 판정불가, 시작 확인이면 건너뜀).
+    detail은 로그와 판정 줄의 reason에 같이 남길 식별자(한도 식별자, 도구 type 이름. 본문 나머지는 버린다)."""
 
     def __init__(self, kind: str, status: str | int, retry_after: float | None = None, detail: str = "") -> None:
         super().__init__(f"{kind}:{status}")
@@ -458,6 +459,82 @@ class ClaudeJudge:
         return CallResult(text=str(data.get("result", "")).strip(), model=",".join(used) or f"{self.model}(별칭)")
 
 
+# Codex 면접관은 글만 읽고 판정한다. 파일, 명령, 웹 검색, 앱, 플러그인 같은 도구는 전부 끈다 (`--sandbox read-only`만으로는
+# 도구가 그대로 제공되어 입력 토큰이 늘고, 답 글에 섞인 지시문이 파일 내용을 밖으로 보낼 여지가 있다).
+# PC 시험(2026-11): web_search="disabled"만 넣으면 apps 기능의 codex_apps MCP로 검색했고, 아래를 전부 끄면 도구 호출 0,
+# 입력 토큰 약 60% 감소. 1라운드 면접관, 토론 중재자, 3단계 검토자는 모두 CodexJudge를 거치므로 이 상수 하나를 쓴다.
+CODEX_DISABLED_FEATURES = (
+    "shell_tool", "unified_exec", "apps", "plugins", "remote_plugin",
+    "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
+    "image_generation", "view_image", "multi_agent", "tool_suggest", "skill_search",
+)
+# --json의 item.started / item.completed에서 도구 호출이 아닌 item.type. 목록에 없는 type(모르는 type 포함)은 도구 호출로 본다.
+CODEX_ALLOWED_ITEM_TYPES = ("agent_message", "reasoning", "error")
+
+
+def codex_tool_args() -> list[str]:
+    """도구를 끄는 명령줄 옵션: 웹 검색 설정 하나와 기능마다 --disable 하나."""
+    args = ["-c", 'web_search="disabled"']
+    for feature in CODEX_DISABLED_FEATURES:
+        args += ["--disable", feature]
+    return args
+
+
+def _json_events(stdout: str):
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict):
+                yield ev
+
+
+_SAFE_TYPE = re.compile(r"[^A-Za-z0-9_.\-]")
+
+
+def codex_tool_item_types(stdout: str) -> list[str]:
+    """--json 이벤트 중 item.started / item.completed의 item.type이 허용 목록(글, 추론, 오류 알림)이 아닌 것들. 없으면 빈 목록.
+
+    허용 목록 방식이라 모르는 type, type이 없거나 문자열이 아닌 item도 도구 호출로 센다. 이름은 로그에 남기므로 글자를 걸러 낸다.
+    """
+    found: dict[str, None] = {}
+    for ev in _json_events(stdout):
+        if ev.get("type") not in ("item.started", "item.completed"):
+            continue
+        item = ev.get("item")
+        t = item.get("type") if isinstance(item, dict) else None
+        if isinstance(t, str) and t in CODEX_ALLOWED_ITEM_TYPES:
+            continue
+        found[(_SAFE_TYPE.sub("", t)[:40] or "?") if isinstance(t, str) else "?"] = None
+    return list(found)
+
+
+def codex_failure_text(stderr: str, stdout: str) -> str:
+    """실패한 Codex 호출에서 오류를 분류할 글: stderr + stdout 이벤트 중 type이 error, turn.failed인 줄의 message.
+
+    turn.failed가 있으면 그것을 우선한다 (중간의 재연결 알림 "Reconnecting... (401 ...)"이 아니라 끝내 실패한 이유).
+    agent_message 같은 모델이 쓴 글은 보지 않는다.
+    """
+    failed: list[str] = []
+    errors: list[str] = []
+    for ev in _json_events(stdout):
+        t = ev.get("type")
+        if t == "turn.failed":
+            err = ev.get("error")
+            msg = err.get("message") if isinstance(err, dict) else None
+            bucket = failed
+        elif t == "error":
+            msg, bucket = ev.get("message"), errors
+        else:
+            continue
+        if isinstance(msg, str):
+            bucket.append(msg)
+    return "\n".join([stderr or "", *(failed or errors)])
+
+
 _TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 
 
@@ -540,6 +617,7 @@ class CodexJudge:
             "-c", "cli_auth_credentials_store=keyring",
             "-C", str(self.workdir), "-m", self.model,
             "-c", f'model_reasoning_effort="{self.effort}"',
+            *codex_tool_args(),
             "--json", "-o", str(out), "-",
         ]
         try:
@@ -553,8 +631,12 @@ class CodexJudge:
             raise CallError("bad", "oserror") from None
         try:
             if p.returncode != 0:
-                kind, tag = _codex_error_kind(p.stderr or "")
+                kind, tag = _codex_error_kind(codex_failure_text(p.stderr or "", p.stdout or ""))
                 raise CallError(kind, tag or f"exit{p.returncode}")
+            tools = codex_tool_item_types(p.stdout or "")
+            if tools:
+                # 도구를 다 껐는데 도구 호출이 있었다: 이 판정은 믿지 않고 판정불가로 둔다 (재시도하지 않는다. 이미 일어난 일이다)
+                raise CallError("tool", "tool_call", detail="도구 호출 type: " + ", ".join(tools))
             # 이번 호출이 새로 쓴 파일만 인정한다. 없거나 비었으면 판정 불가 (보류로 둔갑시키지 않는다)
             text = out.read_text(encoding="utf-8").strip() if out.exists() else ""
             if not text:
@@ -713,6 +795,8 @@ def pick_model(spec: JudgeSpec, *, log: RetryLog, sleep: Callable[[float], None]
                 return {"status": "skipped", "model": None, "reason": "; ".join(reasons) + f" ({DAILY_QUOTA_MESSAGE})"}
             if exc.kind == "auth":  # 인증 문제는 다른 모델로 바꿔도 같다
                 return {"status": "skipped", "model": None, "reason": "; ".join(reasons) + " (인증 실패)"}
+            if exc.kind == "tool":  # 도구가 꺼지지 않았다: 모델을 바꿔도 같다
+                return {"status": "skipped", "model": None, "reason": "; ".join(reasons) + f" ({exc.detail or '도구 호출'}, 도구가 꺼져 있지 않음)"}
             continue  # bad(모델 없음 등)와 일시 오류 3번 실패 → 다음 모델
         return {"status": "active", "model": model, "reason": ""}
     return {"status": "skipped", "model": None, "reason": "; ".join(reasons) + " (모든 모델 실패)"}
@@ -794,12 +878,12 @@ def run_judge(judge, items: list[Item], rows_path: Path, *, log: RetryLog, sleep
         except CallError as exc:
             if stop is not None and stop.is_set():
                 return {"stopped": STOP_MESSAGE}  # Ctrl+C로 자식을 끝내서 난 실패는 기록하지 않는다
-            row = {**base, "model_requested": judge.model, "model_reported": None, "verdict": UNAVAILABLE, "cause": None, "reason": None,
-                   "status": f"failed:{exc.status}", "attempts": exc.attempts, "tokens": None}
+            row = {**base, "model_requested": judge.model, "model_reported": None, "verdict": UNAVAILABLE, "cause": None,
+                   "reason": exc.detail or None, "status": f"failed:{exc.status}", "attempts": exc.attempts, "tokens": None}
             _append(rows_path, row)
             if on_row:
                 on_row(row)
-            if exc.kind != "transient":
+            if exc.kind not in ("transient", "tool"):  # tool(도구 호출 감지)은 이 건만 판정불가로 두고 계속한다 (연속 실패로는 센다)
                 if exc.kind == "daily":
                     return {"stopped": DAILY_QUOTA_MESSAGE}
                 return {"stopped": f"{exc.kind}:{exc.status}"}  # 인증, 설정 문제 → 이 면접관 멈춤
