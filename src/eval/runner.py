@@ -420,7 +420,8 @@ def run_meta(settings: Settings, *, label: str, questions_path: str) -> dict:
 def _git(root: Path, *args: str) -> str | None:
     try:
         out = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, timeout=10
+            ["git", *args], cwd=root, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
         return None

@@ -49,6 +49,8 @@ def _gpu_via_nvidia_smi() -> tuple[str, float] | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=True,
         )

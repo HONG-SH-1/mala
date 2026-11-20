@@ -289,6 +289,10 @@ CHILD_TERMINATE_GRACE = 3.0  # Ctrl+C 뒤 자식 프로세스에 종료를 요�
 
 def tracked_run(cmd, *, input=None, timeout=None, capture_output=False, **kw):
     """subprocess.run과 같게 쓰되, 실행 중인 자식을 기억해 둬서 Ctrl+C 때 끝낼 수 있다."""
+    if kw.get("text") or kw.get("universal_newlines"):
+        # 글자 풀이를 윈도우 기본(cp949)에 맡기지 않는다. 호출자가 정하면 그 값을 쓴다.
+        kw.setdefault("encoding", "utf-8")
+        kw.setdefault("errors", "replace")
     if capture_output:
         kw["stdout"] = subprocess.PIPE
         kw["stderr"] = subprocess.PIPE

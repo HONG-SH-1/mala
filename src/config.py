@@ -55,7 +55,7 @@ def get_settings() -> Settings:
             f"EMBED_PREFIX는 {EMBED_PREFIX_MODES} 중 하나여야 합니다: {embed_prefix!r}"
         )
     return Settings(
-        redis_host=os.getenv("REDIS_HOST", "localhost"),
+        redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
         redis_port=int(os.getenv("REDIS_PORT", "6379")),
         redis_db=int(os.getenv("REDIS_DB", "0")),
         task_queue=os.getenv("TASK_QUEUE", "task_queue"),
